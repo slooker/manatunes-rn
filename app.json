@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "ManaTunes",
+    "slug": "manatunes",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "manatunes",
+    "platforms": [
+      "android"
+    ],
+    "newArchEnabled": false,
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#2196F3"
+      },
+      "package": "us.slooker.manatunes",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "./plugins/withAndroidAuto",
+      "./plugins/withAndroidIcons",
+      "expo-secure-store"
+    ]
+  }
+}

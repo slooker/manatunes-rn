@@ -1,0 +1,5 @@
+This file is a placeholder. Copy ic_music_note.xml (converted to PNG) or any
+music-note PNG from the Kotlin app's drawable resources here, named music_placeholder.png.
+
+Quick option: use a solid-color PNG at 48x48px in your preferred tool,
+or copy ic_launcher_foreground.png from assets/icons/ here renamed to music_placeholder.png.

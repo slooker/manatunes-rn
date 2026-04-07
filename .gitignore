@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Expo / Metro output
+.expo/
+dist/
+web-build/
+*.jsbundle
+
+# Local build caches created while debugging/building
+.claude/
+.android/
+.gradle-local/
+.gradle-local-build2/
+.gradle-release/
+
+# Native build output, keep native source/config tracked
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/**/.cxx/
+android/**/local.properties
+ios/build/
+ios/Pods/
+
+# Signing credentials and local secrets
+android/keystore.properties
+android/*.jks
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.env
+.env.local
+
+# Editor / OS / logs
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*.hprof
+*.orig.*
+npm-debug.*
+yarn-debug.*
+yarn-error.*

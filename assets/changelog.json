@@ -1,0 +1,51 @@
+{
+  "changelog": [
+    {
+      "version": "1.0",
+      "date": "2026-01-01",
+      "title": "Android Auto Voice Search & Playback Fixes",
+      "icon": "search",
+      "changes": [
+        "Fixed playback issues causing blank screens",
+        "Implemented voice search support in Android Auto",
+        "Added browsing support with Random Songs folder in Android Auto",
+        "Fixed 'Multiple playing browser services' conflict",
+        "Improved Google Assistant app name recognition",
+        "Added support for pronunciation variations",
+        "Songs now play directly from search results in Android Auto",
+        "Fixed manifest configuration for Google Play release"
+      ]
+    },
+    {
+      "version": "1.0",
+      "date": "2025-12-22",
+      "title": "Android Auto Reliability Fixes",
+      "icon": "car",
+      "changes": [
+        "Added foreground notification for reliable Android Auto connectivity",
+        "Implemented service auto-start mechanism",
+        "Fixed Android Auto connection issues in real cars",
+        "Added persistent MediaSession for in-car browsing",
+        "Improved service lifecycle management"
+      ]
+    },
+    {
+      "version": "1.0",
+      "date": "2025-12",
+      "title": "Initial Release",
+      "icon": "star",
+      "changes": [
+        "Advanced queue management with drag-to-reorder",
+        "Auto-scroll when dragging near screen edges",
+        "Haptic feedback and smooth visual animations",
+        "Browse artists, albums, and songs in Android Auto",
+        "Play full albums from Android Auto interface",
+        "Search functionality in Android Auto",
+        "Google Assistant voice command support",
+        "Multiple server management with encrypted storage",
+        "Full-featured media player with ExoPlayer",
+        "Modern Material Design 3 UI"
+      ]
+    }
+  ]
+}
