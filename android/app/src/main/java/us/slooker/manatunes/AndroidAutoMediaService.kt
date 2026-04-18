@@ -14,6 +14,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
+import androidx.media.utils.MediaConstants
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -30,6 +31,34 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
   private var mediaPlayer: MediaPlayer? = null
   private var queue: List<AutoSong> = emptyList()
   private var queueIndex = -1
+  private var restoredPositionMs: Long? = null
+  private val childrenCache = mutableMapOf<String, MutableList<MediaBrowserCompat.MediaItem>>()
+  private var playbackState = PlaybackStateCompat.STATE_NONE
+  private var currentDurationMs: Long? = null
+  private var progressTickCount = 0
+  private val progressRunnable = object : Runnable {
+    override fun run() {
+      val player = mediaPlayer
+      if (player == null || playbackState != PlaybackStateCompat.STATE_PLAYING) return
+
+      val position = player.safeCurrentPosition()
+      val duration = currentDurationMs ?: player.safeDuration()
+      if (duration != null && position >= duration - COMPLETION_ADVANCE_EARLY_MS) {
+        advanceAfterCompletion()
+        return
+      }
+
+      updatePlaybackState(PlaybackStateCompat.STATE_PLAYING)
+
+      // Persist position every ~30 seconds so a sudden process kill loses minimal progress
+      progressTickCount++
+      if (progressTickCount % QUEUE_SAVE_INTERVAL_TICKS == 0) {
+        saveQueueState()
+      }
+
+      mainHandler.postDelayed(this, PROGRESS_UPDATE_INTERVAL_MS)
+    }
+  }
 
   override fun onCreate() {
     super.onCreate()
@@ -44,7 +73,10 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         override fun onPause() = pause()
         override fun onStop() = stop()
         override fun onSkipToNext() = skipTo(queueIndex + 1)
-        override fun onSkipToPrevious() = skipTo((queueIndex - 1).coerceAtLeast(0))
+        override fun onSkipToPrevious() = rewindOrPrevious()
+        override fun onFastForward() = skipTo(queueIndex + 1)
+        override fun onRewind() = rewindOrPrevious()
+        override fun onSeekTo(pos: Long) = seekTo(pos)
 
         override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
           if (mediaId == null) return
@@ -61,27 +93,56 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
 
     sessionToken = mediaSession.sessionToken
     updatePlaybackState(PlaybackStateCompat.STATE_NONE)
+    restoreQueueState()
   }
 
   override fun onDestroy() {
+    saveQueueState()
+    stopProgressUpdates()
     mediaPlayer?.release()
     abandonAudioFocus()
     mediaSession.release()
     super.onDestroy()
   }
 
+  override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+    saveQueueState()
+    super.onTaskRemoved(rootIntent)
+  }
+
   override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot {
-    return BrowserRoot(ROOT_ID, null)
+    val extras = Bundle().apply {
+      putBoolean(MediaConstants.BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED, true)
+    }
+    return BrowserRoot(ROOT_ID, extras)
   }
 
   override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+    val cached = childrenCache[parentId]
+    if (cached != null) {
+      result.sendResult(cached)
+      // Refresh the cache in the background for next time
+      thread(name = "ManaTunesAndroidAutoBrowse") {
+        try {
+          val fresh = loadChildren(parentId)
+          childrenCache[parentId] = fresh
+        } catch (_: Exception) { }
+      }
+      return
+    }
+
     result.detach()
     thread(name = "ManaTunesAndroidAutoBrowse") {
       val items = try {
         loadChildren(parentId)
       } catch (e: Exception) {
-        mutableListOf(errorItem("Could not load ManaTunes", e.message ?: "Unknown error"))
+        if (isPlaybackActive()) {
+          rootItems()
+        } else {
+          mutableListOf(errorItem("Could not load ManaTunes", e.message ?: "Unknown error"))
+        }
       }
+      childrenCache[parentId] = items
       result.sendResult(items)
     }
   }
@@ -96,9 +157,9 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         val albums = search.optJSONArray("album").orEmptyObjects().map(::albumFromJson)
         val artists = search.optJSONArray("artist").orEmptyObjects().map(::artistFromJson)
         mutableListOf<MediaBrowserCompat.MediaItem>().apply {
-          addAll(songs.map { songItem(it) })
-          addAll(albums.map { albumItem(it, "${PREFIX_ALBUM}${it.id}") })
           addAll(artists.map { artistItem(it) })
+          addAll(albums.map { albumItem(it, "${PREFIX_ALBUM}${it.id}") })
+          addAll(songs.map { songItem(it, "${PREFIX_SEARCH_SONG}${it.id}${MEDIA_ID_SEPARATOR}${query}") })
         }
       } catch (e: Exception) {
         mutableListOf(errorItem("Search failed", e.message ?: "Unknown error"))
@@ -111,12 +172,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     val client = createClientFromPrefs() ?: return noServerItems()
 
     return when {
-      parentId == ROOT_ID -> mutableListOf(
-        browseItem(MEDIA_ID_ARTISTS, "Artists", "Browse all artists"),
-        browseItem(MEDIA_ID_ALBUMS, "Albums", "Browse albums"),
-        browseItem(MEDIA_ID_FAVORITES, "Favorites", "Browse starred music"),
-        browseItem(MEDIA_ID_DOWNLOADED, "Downloaded", "Browse downloaded music")
-      )
+      parentId == ROOT_ID -> rootItems()
 
       parentId == MEDIA_ID_ARTISTS ->
         client.getArtists().map(::artistFromJson).map(::artistItem).toMutableList()
@@ -140,7 +196,9 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         client.getStarred2().optJSONArray("album").orEmptyObjects().map(::albumFromJson).map { albumItem(it, "${PREFIX_ALBUM}${it.id}") }.toMutableList()
 
       parentId == MEDIA_ID_FAVORITE_SONGS ->
-        client.getStarred2().optJSONArray("song").orEmptyObjects().map(::songFromJson).map(::songItem).toMutableList()
+        client.getStarred2().optJSONArray("song").orEmptyObjects().map(::songFromJson).map { song ->
+          songItem(song, "${PREFIX_FAVORITE_SONG}${song.id}")
+        }.toMutableList()
 
       parentId == MEDIA_ID_DOWNLOADED -> downloadedItems()
 
@@ -170,7 +228,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
           .optJSONArray("song")
           .orEmptyObjects()
           .map(::songFromJson)
-          .map(::songItem)
+          .map { song -> songItem(song, "${PREFIX_ALBUM_SONG}${albumId}${MEDIA_ID_SEPARATOR}${song.id}") }
           .toMutableList()
       }
 
@@ -188,6 +246,9 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
 
         val client = createClientFromPrefs() ?: return@thread
         when {
+          mediaId.startsWith(PREFIX_SEARCH_SONG) -> playSearchSong(mediaId, client)
+          mediaId.startsWith(PREFIX_ALBUM_SONG) -> playAlbumSong(mediaId, client)
+          mediaId.startsWith(PREFIX_FAVORITE_SONG) -> playFavoriteSong(mediaId, client)
           mediaId.startsWith(PREFIX_SONG) -> playQueue(listOf(client.getSong(mediaId.removePrefix(PREFIX_SONG)).let(::songFromJson)), 0, client)
           mediaId.startsWith(PREFIX_ALBUM) -> {
             val songs = client.getAlbum(mediaId.removePrefix(PREFIX_ALBUM)).optJSONArray("song").orEmptyObjects().map(::songFromJson)
@@ -201,9 +262,34 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
           }
         }
       } catch (_: Exception) {
-        updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+        handlePlaybackError()
       }
     }
+  }
+
+  private fun playSearchSong(mediaId: String, client: AutoSubsonicClient) {
+    val parts = mediaId.removePrefix(PREFIX_SEARCH_SONG).split(MEDIA_ID_SEPARATOR, limit = 2)
+    val songId = parts.getOrNull(0) ?: return
+    val query = parts.getOrNull(1).orEmpty()
+    val songs = client.search3(query).optJSONArray("song").orEmptyObjects().map(::songFromJson)
+    val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
+    playQueue(songs, index, client)
+  }
+
+  private fun playAlbumSong(mediaId: String, client: AutoSubsonicClient) {
+    val parts = mediaId.removePrefix(PREFIX_ALBUM_SONG).split(MEDIA_ID_SEPARATOR, limit = 2)
+    val albumId = parts.getOrNull(0) ?: return
+    val songId = parts.getOrNull(1) ?: return
+    val songs = client.getAlbum(albumId).optJSONArray("song").orEmptyObjects().map(::songFromJson)
+    val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
+    playQueue(songs, index, client)
+  }
+
+  private fun playFavoriteSong(mediaId: String, client: AutoSubsonicClient) {
+    val songId = mediaId.removePrefix(PREFIX_FAVORITE_SONG)
+    val songs = client.getStarred2().optJSONArray("song").orEmptyObjects().map(::songFromJson)
+    val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
+    playQueue(songs, index, client)
   }
 
   private fun playFirstSearchResult(query: String) {
@@ -213,7 +299,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         val songs = client.search3(query).optJSONArray("song").orEmptyObjects().map(::songFromJson)
         playQueue(songs, 0, client)
       } catch (_: Exception) {
-        updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+        handlePlaybackError()
       }
     }
   }
@@ -222,6 +308,8 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     if (songs.isEmpty()) return
     queue = songs
     queueIndex = startIndex.coerceIn(songs.indices)
+    restoredPositionMs = null
+    saveQueueState(positionMs = 0L)
     playSong(queue[queueIndex], client)
   }
 
@@ -240,12 +328,15 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
 
     if (songs.isEmpty()) return
     if (!requestAudioFocus()) {
-      updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+      handlePlaybackError()
       return
     }
 
     val index = startIndex.coerceIn(songs.indices)
     val song = songs[index]
+    stopProgressUpdates()
+    releaseCurrentPlayer()
+    currentDurationMs = song.duration?.times(1000L)
     mediaSession.setMetadata(
       MediaMetadataCompat.Builder()
         .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, song.id)
@@ -256,9 +347,8 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         }
         .build()
     )
-    updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING)
+    updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING, 0L)
 
-    mediaPlayer?.release()
     mediaPlayer = MediaPlayer().apply {
       setAudioAttributes(
         AudioAttributes.Builder()
@@ -270,8 +360,10 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
       setOnPreparedListener {
         it.start()
         updatePlaybackState(PlaybackStateCompat.STATE_PLAYING)
+        startProgressUpdates()
       }
       setOnCompletionListener {
+        stopProgressUpdates()
         if (index < songs.lastIndex) {
           playDownloadedQueue(songs, index + 1)
         } else {
@@ -279,28 +371,30 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         }
       }
       setOnErrorListener { _, _, _ ->
-        updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+        handlePlaybackError()
         true
       }
       prepareAsync()
     }
   }
 
-  private fun playSong(song: AutoSong, client: AutoSubsonicClient) {
+  private fun playSong(song: AutoSong, client: AutoSubsonicClient, seekToMs: Long = 0L) {
     if (Looper.myLooper() != Looper.getMainLooper()) {
-      mainHandler.post { playSong(song, client) }
+      mainHandler.post { playSong(song, client, seekToMs) }
       return
     }
 
     if (!requestAudioFocus()) {
-      updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+      handlePlaybackError()
       return
     }
 
+    stopProgressUpdates()
+    releaseCurrentPlayer()
     updateMetadata(song, client)
-    updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING)
+    currentDurationMs = song.duration?.times(1000L)
+    updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING, seekToMs.takeIf { it > 0L })
 
-    mediaPlayer?.release()
     mediaPlayer = MediaPlayer().apply {
       setAudioAttributes(
         AudioAttributes.Builder()
@@ -310,19 +404,23 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
       )
       setDataSource(client.streamUrl(song.id))
       setOnPreparedListener {
+        if (seekToMs > 0L) it.seekTo(seekToMs.toInt())
         it.start()
         updatePlaybackState(PlaybackStateCompat.STATE_PLAYING)
+        startProgressUpdates()
       }
       setOnCompletionListener {
+        stopProgressUpdates()
         if (queueIndex < queue.lastIndex) {
           queueIndex += 1
+          saveQueueState(positionMs = 0L)
           playSong(queue[queueIndex], client)
         } else {
           updatePlaybackState(PlaybackStateCompat.STATE_STOPPED)
         }
       }
       setOnErrorListener { _, _, _ ->
-        updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+        handlePlaybackError()
         true
       }
       prepareAsync()
@@ -331,9 +429,18 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
 
   private fun resume() {
     mainHandler.post {
+      // Restored from a previous session — start streaming from the saved position
+      if (mediaPlayer == null && queue.isNotEmpty() && queueIndex in queue.indices) {
+        val client = createClientFromPrefs() ?: return@post
+        val seekTo = restoredPositionMs ?: 0L
+        restoredPositionMs = null
+        playSong(queue[queueIndex], client, seekTo)
+        return@post
+      }
       if (requestAudioFocus()) {
         mediaPlayer?.start()
         updatePlaybackState(PlaybackStateCompat.STATE_PLAYING)
+        startProgressUpdates()
       }
     }
   }
@@ -341,15 +448,19 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
   private fun pause() {
     mainHandler.post {
       mediaPlayer?.pause()
+      stopProgressUpdates()
       updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
+      saveQueueState()
     }
   }
 
   private fun stop() {
     mainHandler.post {
       mediaPlayer?.stop()
+      stopProgressUpdates()
       abandonAudioFocus()
       updatePlaybackState(PlaybackStateCompat.STATE_STOPPED)
+      clearQueueState()
     }
   }
 
@@ -357,7 +468,155 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     val client = createClientFromPrefs() ?: return
     if (index !in queue.indices) return
     queueIndex = index
+    saveQueueState(positionMs = 0L)
     playSong(queue[queueIndex], client)
+  }
+
+  private fun rewindOrPrevious() {
+    mainHandler.post {
+      val player = mediaPlayer
+      if (player != null && player.currentPosition > 5_000) {
+        player.seekTo(0)
+        updatePlaybackState(playbackState)
+        return@post
+      }
+
+      skipTo((queueIndex - 1).coerceAtLeast(0))
+    }
+  }
+
+  private fun seekBy(deltaMs: Int) {
+    mainHandler.post {
+      val player = mediaPlayer ?: return@post
+      val duration = player.duration.takeIf { it > 0 }
+      val nextPosition = (player.currentPosition + deltaMs).let { position ->
+        if (duration != null) position.coerceIn(0, duration) else position.coerceAtLeast(0)
+      }
+      player.seekTo(nextPosition)
+      updatePlaybackState(playbackState)
+    }
+  }
+
+  private fun seekTo(positionMs: Long) {
+    mainHandler.post {
+      val player = mediaPlayer ?: return@post
+      val duration = player.duration.takeIf { it > 0 }
+      val nextPosition = if (duration != null) {
+        positionMs.coerceIn(0L, duration.toLong())
+      } else {
+        positionMs.coerceAtLeast(0L)
+      }
+      player.seekTo(nextPosition.toInt())
+      updatePlaybackState(playbackState)
+    }
+  }
+
+  private fun handlePlaybackError() {
+    if (isPlaybackActive()) {
+      updatePlaybackState(playbackState)
+    } else {
+      updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
+    }
+  }
+
+  private fun startProgressUpdates() {
+    stopProgressUpdates()
+    progressTickCount = 0
+    mainHandler.postDelayed(progressRunnable, PROGRESS_UPDATE_INTERVAL_MS)
+  }
+
+  private fun stopProgressUpdates() {
+    mainHandler.removeCallbacks(progressRunnable)
+  }
+
+  private fun releaseCurrentPlayer() {
+    mediaPlayer?.release()
+    mediaPlayer = null
+  }
+
+  private fun advanceAfterCompletion() {
+    stopProgressUpdates()
+    if (queueIndex < queue.lastIndex) {
+      skipTo(queueIndex + 1)
+    } else {
+      clearQueueState()
+      updatePlaybackState(PlaybackStateCompat.STATE_STOPPED)
+    }
+  }
+
+  private fun saveQueueState(positionMs: Long = mediaPlayer?.safeCurrentPosition()?.toLong() ?: restoredPositionMs ?: 0L) {
+    if (queue.isEmpty()) return
+    val songsJson = JSONArray()
+    queue.forEach { song ->
+      songsJson.put(JSONObject().apply {
+        put("id", song.id)
+        put("title", song.title)
+        song.artist?.let { put("artist", it) }
+        song.album?.let { put("album", it) }
+        song.coverArt?.let { put("coverArt", it) }
+        song.duration?.let { put("duration", it) }
+      })
+    }
+    val state = JSONObject().apply {
+      put("index", queueIndex)
+      put("positionMs", positionMs)
+      put("songs", songsJson)
+    }
+    getSharedPreferences(AndroidAutoConfigModule.PREFS_NAME, 0)
+      .edit().putString(KEY_QUEUE_STATE, state.toString()).apply()
+  }
+
+  private fun clearQueueState() {
+    getSharedPreferences(AndroidAutoConfigModule.PREFS_NAME, 0)
+      .edit().remove(KEY_QUEUE_STATE).apply()
+  }
+
+  private fun restoreQueueState() {
+    val json = getSharedPreferences(AndroidAutoConfigModule.PREFS_NAME, 0)
+      .getString(KEY_QUEUE_STATE, null) ?: return
+    try {
+      val obj = JSONObject(json)
+      val songsJson = obj.optJSONArray("songs").orEmptyObjects()
+      if (songsJson.isEmpty()) return
+      val songs = songsJson.map { songJson ->
+        AutoSong(
+          id = songJson.optString("id"),
+          title = songJson.optString("title", "Unknown Track"),
+          artist = songJson.optString("artist").takeIf { it.isNotBlank() },
+          album = songJson.optString("album").takeIf { it.isNotBlank() },
+          coverArt = songJson.optString("coverArt").takeIf { it.isNotBlank() },
+          duration = songJson.optInt("duration").takeIf { songJson.has("duration") }
+        )
+      }
+      val index = obj.optInt("index", 0).coerceIn(songs.indices)
+      val positionMs = obj.optLong("positionMs", 0L)
+
+      queue = songs
+      queueIndex = index
+      restoredPositionMs = positionMs
+      currentDurationMs = songs[index].duration?.times(1000L)
+
+      val song = songs[index]
+      val client = createClientFromPrefs()
+      if (client != null) {
+        updateMetadata(song, client)
+      } else {
+        mediaSession.setMetadata(
+          MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, song.id)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, song.title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, song.artist)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, song.album)
+            .apply {
+              if (song.duration != null) putLong(MediaMetadataCompat.METADATA_KEY_DURATION, song.duration * 1000L)
+            }
+            .build()
+        )
+      }
+      updatePlaybackState(PlaybackStateCompat.STATE_PAUSED, positionMs)
+    } catch (_: Exception) {
+      // Corrupted saved state — ignore and start fresh
+    }
   }
 
   private fun requestAudioFocus(): Boolean {
@@ -402,8 +661,9 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     )
   }
 
-  private fun updatePlaybackState(state: Int) {
-    val position = mediaPlayer?.currentPosition?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN
+  private fun updatePlaybackState(state: Int, positionOverride: Long? = null) {
+    playbackState = state
+    val position = positionOverride ?: mediaPlayer?.currentPosition?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN
     mediaSession.setPlaybackState(
       PlaybackStateCompat.Builder()
         .setActions(
@@ -412,6 +672,9 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
             PlaybackStateCompat.ACTION_STOP or
             PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackStateCompat.ACTION_FAST_FORWARD or
+            PlaybackStateCompat.ACTION_REWIND or
+            PlaybackStateCompat.ACTION_SEEK_TO or
             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
             PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH
         )
@@ -420,11 +683,37 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     )
   }
 
+  private fun isPlaybackActive() =
+    playbackState == PlaybackStateCompat.STATE_PLAYING ||
+      playbackState == PlaybackStateCompat.STATE_BUFFERING ||
+      playbackState == PlaybackStateCompat.STATE_PAUSED
+
+  private fun MediaPlayer.safeCurrentPosition() =
+    try {
+      currentPosition
+    } catch (_: IllegalStateException) {
+      0
+    }
+
+  private fun MediaPlayer.safeDuration() =
+    try {
+      duration.takeIf { it > 0 }?.toLong()
+    } catch (_: IllegalStateException) {
+      null
+    }
+
   private fun browseItem(id: String, title: String, subtitle: String) =
     MediaBrowserCompat.MediaItem(
       MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title).setSubtitle(subtitle).build(),
       MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
     )
+
+  private fun rootItems() = mutableListOf(
+    browseItem(MEDIA_ID_ARTISTS, "Artists", "Browse all artists"),
+    browseItem(MEDIA_ID_ALBUMS, "Albums", "Browse albums"),
+    browseItem(MEDIA_ID_FAVORITES, "Favorites", "Browse starred music"),
+    browseItem(MEDIA_ID_DOWNLOADED, "Downloaded", "Browse downloaded music")
+  )
 
   private fun artistItem(artist: AutoArtist) =
     browseItem("${PREFIX_ARTIST}${artist.id}", artist.name, "${artist.albumCount ?: 0} albums")
@@ -439,10 +728,10 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
       MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
     )
 
-  private fun songItem(song: AutoSong) =
+  private fun songItem(song: AutoSong, mediaId: String = "${PREFIX_SONG}${song.id}") =
     MediaBrowserCompat.MediaItem(
       MediaDescriptionCompat.Builder()
-        .setMediaId("${PREFIX_SONG}${song.id}")
+        .setMediaId(mediaId)
         .setTitle(song.title)
         .setSubtitle(song.artist ?: song.album ?: "Song")
         .build(),
@@ -657,7 +946,15 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     const val PREFIX_ARTIST = "artist:"
     const val PREFIX_ALBUM = "album:"
     const val PREFIX_SONG = "song:"
+    const val PREFIX_ALBUM_SONG = "album_song:"
+    const val PREFIX_SEARCH_SONG = "search_song:"
+    const val PREFIX_FAVORITE_SONG = "favorite_song:"
     const val PREFIX_DOWNLOADED_ALBUM = "downloaded_album:"
     const val PREFIX_DOWNLOADED_SONG = "downloaded_song:"
+    const val MEDIA_ID_SEPARATOR = "||"
+    const val KEY_QUEUE_STATE = "queue_state"
+    const val COMPLETION_ADVANCE_EARLY_MS = 500L
+    const val PROGRESS_UPDATE_INTERVAL_MS = 500L
+    const val QUEUE_SAVE_INTERVAL_TICKS = 60 // save every ~30 s (60 × 500 ms)
   }
 }

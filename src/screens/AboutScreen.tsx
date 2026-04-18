@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Linking, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 
 interface ChangelogEntry {
   version: string;
@@ -29,6 +30,10 @@ const FEATURES = [
 
 export default function AboutScreen() {
   const [changelog, setChangelog] = useState<ChangelogEntry[]>([]);
+  const appVersion =
+    Constants.nativeAppVersion ??
+    Constants.expoConfig?.version ??
+    'Unknown';
 
   useEffect(() => {
     try {
@@ -54,7 +59,7 @@ export default function AboutScreen() {
         <View style={styles.divider} />
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Version</Text>
-          <Text style={styles.infoValue}>1.0</Text>
+          <Text style={styles.infoValue}>{appVersion}</Text>
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Package</Text>
