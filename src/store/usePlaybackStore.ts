@@ -21,6 +21,7 @@ interface PlaybackStore {
   duration: number;
   repeatMode: RepeatMode;
   shuffleEnabled: boolean;
+  originalQueue: Track[] | null;
   artistContext: ArtistContext | null;
   albumContext: AlbumContext | null;
 
@@ -44,7 +45,7 @@ interface PlaybackStore {
   skipToNext(): Promise<void>;
   skipToPrevious(): Promise<void>;
   seekTo(position: number): Promise<void>;
-  toggleShuffle(): void;
+  toggleShuffle(): Promise<void>;
   cycleRepeatMode(): Promise<void>;
   clearQueue(): Promise<void>;
   reorderQueue(from: number, to: number): Promise<void>;
@@ -88,6 +89,7 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
   duration: 0,
   repeatMode: RepeatMode.Off,
   shuffleEnabled: false,
+  originalQueue: null,
   artistContext: null,
   albumContext: null,
 
@@ -102,7 +104,7 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
     await TrackPlayer.reset();
     await TrackPlayer.add([track]);
     await TrackPlayer.play();
-    set({ currentTrack: track, queue: [track] });
+    set({ currentTrack: track, queue: [track], shuffleEnabled: false, originalQueue: null });
   },
 
   async playSongs(songs, startIndex, getStreamUrl, getCoverArtUrl) {
@@ -113,7 +115,7 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
       await TrackPlayer.skip(startIndex);
     }
     await TrackPlayer.play();
-    set({ currentTrack: tracks[startIndex] ?? null, queue: tracks });
+    set({ currentTrack: tracks[startIndex] ?? null, queue: tracks, shuffleEnabled: false, originalQueue: null });
   },
 
   async addToQueue(song, getStreamUrl, getCoverArtUrl) {
@@ -173,8 +175,43 @@ export const usePlaybackStore = create<PlaybackStore>((set, get) => ({
     await TrackPlayer.seekTo(position);
   },
 
-  toggleShuffle() {
-    set((s) => ({ shuffleEnabled: !s.shuffleEnabled }));
+  async toggleShuffle() {
+    const { shuffleEnabled, originalQueue } = get();
+    const currentQueue = await TrackPlayer.getQueue();
+    const currentIndex = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+
+    if (currentQueue.length === 0) {
+      set((s) => ({ shuffleEnabled: !s.shuffleEnabled }));
+      return;
+    }
+
+    if (!shuffleEnabled) {
+      // Shuffle everything after the current track, leave history intact
+      const upcoming = currentQueue.slice(currentIndex + 1);
+      for (let i = upcoming.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [upcoming[i], upcoming[j]] = [upcoming[j], upcoming[i]];
+      }
+      if (upcoming.length > 0) {
+        await TrackPlayer.remove(upcoming.map((_, i) => currentIndex + 1 + i));
+        await TrackPlayer.add(upcoming);
+      }
+      const newQueue = await TrackPlayer.getQueue();
+      set({ shuffleEnabled: true, originalQueue: currentQueue, queue: newQueue });
+    } else {
+      // Restore original upcoming tracks from the saved pre-shuffle queue
+      const saved = originalQueue;
+      const currentTrack = currentQueue[currentIndex];
+      if (saved && currentTrack) {
+        const originalIndex = saved.findIndex((t) => t.id === currentTrack.id);
+        const restoredUpcoming = originalIndex >= 0 ? saved.slice(originalIndex + 1) : [];
+        const upcomingIndices = currentQueue.map((_, i) => i).filter((i) => i > currentIndex);
+        if (upcomingIndices.length > 0) await TrackPlayer.remove(upcomingIndices);
+        if (restoredUpcoming.length > 0) await TrackPlayer.add(restoredUpcoming);
+      }
+      const newQueue = await TrackPlayer.getQueue();
+      set({ shuffleEnabled: false, originalQueue: null, queue: newQueue });
+    }
   },
 
   async cycleRepeatMode() {

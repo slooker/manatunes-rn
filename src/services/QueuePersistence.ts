@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import TrackPlayer, { State, Track } from 'react-native-track-player';
+import TrackPlayer, { RepeatMode, State, Track } from 'react-native-track-player';
 import { usePlaybackStore } from '@store/usePlaybackStore';
 
 const STORAGE_KEY = 'queue_state';
@@ -8,6 +8,9 @@ interface QueueState {
   tracks: Track[];
   currentIndex: number;
   position: number;
+  shuffleEnabled?: boolean;
+  repeatMode?: RepeatMode;
+  originalQueue?: Track[];
 }
 
 export const QueuePersistence = {
@@ -18,10 +21,14 @@ export const QueuePersistence = {
         TrackPlayer.getActiveTrackIndex(),
         TrackPlayer.getProgress(),
       ]);
+      const { shuffleEnabled, repeatMode, originalQueue } = usePlaybackStore.getState();
       const state: QueueState = {
         tracks: queue,
         currentIndex: index ?? 0,
         position: progress.position,
+        shuffleEnabled,
+        repeatMode,
+        originalQueue: originalQueue ?? undefined,
       };
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
@@ -56,6 +63,8 @@ export const QueuePersistence = {
         usePlaybackStore.getState().setCurrentTrack(track ?? null);
         usePlaybackStore.getState().setQueue(existingQueue);
         usePlaybackStore.getState().setIsPlaying(playerState.state === State.Playing);
+        // Repeat mode is owned by RNTP natively, no need to restore it.
+        // Shuffle/originalQueue live only in JS store and were lost on kill — nothing to restore.
         return;
       }
 
@@ -82,6 +91,17 @@ export const QueuePersistence = {
       usePlaybackStore.getState().setCurrentTrack(track ?? null);
       usePlaybackStore.getState().setQueue(state.tracks);
       usePlaybackStore.getState().setIsPlaying(false);
+
+      if (state.repeatMode != null) {
+        await TrackPlayer.setRepeatMode(state.repeatMode);
+        usePlaybackStore.setState({ repeatMode: state.repeatMode });
+      }
+      if (state.shuffleEnabled) {
+        usePlaybackStore.setState({
+          shuffleEnabled: true,
+          originalQueue: state.originalQueue ?? null,
+        });
+      }
     } catch (e) {
       // Non-fatal — corrupted state, start fresh
     }

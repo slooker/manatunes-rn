@@ -200,6 +200,17 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
           songItem(song, "${PREFIX_FAVORITE_SONG}${song.id}")
         }.toMutableList()
 
+      parentId == MEDIA_ID_GENRES ->
+        client.getGenres().map(::genreFromJson).map(::genreItem).toMutableList()
+
+      parentId.startsWith(PREFIX_GENRE) -> {
+        val genreName = parentId.removePrefix(PREFIX_GENRE)
+        client.getSongsByGenre(genreName, 200)
+          .map(::songFromJson)
+          .map { song -> songItem(song, "${PREFIX_GENRE_SONG}${song.id}${MEDIA_ID_SEPARATOR}${genreName}") }
+          .toMutableList()
+      }
+
       parentId == MEDIA_ID_DOWNLOADED -> downloadedItems()
 
       parentId.startsWith(PREFIX_DOWNLOADED_ALBUM) -> {
@@ -249,6 +260,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
           mediaId.startsWith(PREFIX_SEARCH_SONG) -> playSearchSong(mediaId, client)
           mediaId.startsWith(PREFIX_ALBUM_SONG) -> playAlbumSong(mediaId, client)
           mediaId.startsWith(PREFIX_FAVORITE_SONG) -> playFavoriteSong(mediaId, client)
+          mediaId.startsWith(PREFIX_GENRE_SONG) -> playGenreSong(mediaId, client)
           mediaId.startsWith(PREFIX_SONG) -> playQueue(listOf(client.getSong(mediaId.removePrefix(PREFIX_SONG)).let(::songFromJson)), 0, client)
           mediaId.startsWith(PREFIX_ALBUM) -> {
             val songs = client.getAlbum(mediaId.removePrefix(PREFIX_ALBUM)).optJSONArray("song").orEmptyObjects().map(::songFromJson)
@@ -281,6 +293,15 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     val albumId = parts.getOrNull(0) ?: return
     val songId = parts.getOrNull(1) ?: return
     val songs = client.getAlbum(albumId).optJSONArray("song").orEmptyObjects().map(::songFromJson)
+    val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
+    playQueue(songs, index, client)
+  }
+
+  private fun playGenreSong(mediaId: String, client: AutoSubsonicClient) {
+    val parts = mediaId.removePrefix(PREFIX_GENRE_SONG).split(MEDIA_ID_SEPARATOR, limit = 2)
+    val songId = parts.getOrNull(0) ?: return
+    val genreName = parts.getOrNull(1).orEmpty()
+    val songs = client.getSongsByGenre(genreName, 200).map(::songFromJson)
     val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
     playQueue(songs, index, client)
   }
@@ -711,9 +732,18 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
   private fun rootItems() = mutableListOf(
     browseItem(MEDIA_ID_ARTISTS, "Artists", "Browse all artists"),
     browseItem(MEDIA_ID_ALBUMS, "Albums", "Browse albums"),
+    browseItem(MEDIA_ID_GENRES, "Genres", "Browse by genre"),
     browseItem(MEDIA_ID_FAVORITES, "Favorites", "Browse starred music"),
     browseItem(MEDIA_ID_DOWNLOADED, "Downloaded", "Browse downloaded music")
   )
+
+  private fun genreFromJson(json: JSONObject) = AutoGenre(
+    name = json.optString("value", "Unknown Genre"),
+    songCount = json.optInt("songCount", 0)
+  )
+
+  private fun genreItem(genre: AutoGenre) =
+    browseItem("${PREFIX_GENRE}${genre.name}", genre.name, "${genre.songCount} songs")
 
   private fun artistItem(artist: AutoArtist) =
     browseItem("${PREFIX_ARTIST}${artist.id}", artist.name, "${artist.albumCount ?: 0} albums")
@@ -840,6 +870,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     val coverArt: String?,
     val duration: Int?
   )
+  private data class AutoGenre(val name: String, val songCount: Int)
   private data class AutoDownloadedAlbum(
     val id: String,
     val name: String,
@@ -874,6 +905,17 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
       get("/getAlbumList2", "type" to type, "size" to size.toString())
         .optJSONObject("albumList2")
         ?.optJSONArray("album")
+        .orEmptyObjects()
+
+    fun getGenres(): List<JSONObject> =
+      get("/getGenres").optJSONObject("genres")
+        ?.optJSONArray("genre")
+        .orEmptyObjects()
+
+    fun getSongsByGenre(genre: String, count: Int): List<JSONObject> =
+      get("/getSongsByGenre", "genre" to genre, "count" to count.toString())
+        .optJSONObject("songsByGenre")
+        ?.optJSONArray("song")
         .orEmptyObjects()
 
     fun search3(query: String): JSONObject =
@@ -943,6 +985,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     const val MEDIA_ID_FAVORITE_ALBUMS = "favorite_albums"
     const val MEDIA_ID_FAVORITE_SONGS = "favorite_songs"
     const val MEDIA_ID_DOWNLOADED = "downloaded"
+    const val MEDIA_ID_GENRES = "genres"
     const val PREFIX_ARTIST = "artist:"
     const val PREFIX_ALBUM = "album:"
     const val PREFIX_SONG = "song:"
@@ -951,6 +994,8 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     const val PREFIX_FAVORITE_SONG = "favorite_song:"
     const val PREFIX_DOWNLOADED_ALBUM = "downloaded_album:"
     const val PREFIX_DOWNLOADED_SONG = "downloaded_song:"
+    const val PREFIX_GENRE = "genre:"
+    const val PREFIX_GENRE_SONG = "genre_song:"
     const val MEDIA_ID_SEPARATOR = "||"
     const val KEY_QUEUE_STATE = "queue_state"
     const val COMPLETION_ADVANCE_EARLY_MS = 500L
