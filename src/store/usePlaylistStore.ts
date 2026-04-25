@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { FavoriteSong } from './useFavoritesStore';
+import { Analytics } from '@services/Analytics';
 
 export interface LocalPlaylist {
   id: string;
@@ -48,6 +49,7 @@ export const usePlaylistStore = create<PlaylistStore>((set, get) => ({
     const updated = [...get().playlists, playlist];
     await persist(updated);
     set({ playlists: updated });
+    Analytics.createPlaylist(name);
     return playlist;
   },
 
@@ -60,21 +62,24 @@ export const usePlaylistStore = create<PlaylistStore>((set, get) => ({
   },
 
   async deletePlaylist(id) {
+    const deleted = get().playlists.find((p) => p.id === id);
     const updated = get().playlists.filter((p) => p.id !== id);
     await persist(updated);
     set({ playlists: updated });
+    if (deleted) Analytics.deletePlaylist(deleted.name);
   },
 
   async addSongsToPlaylist(id, songs) {
+    const playlist = get().playlists.find((p) => p.id === id);
     const updated = get().playlists.map((p) => {
       if (p.id !== id) return p;
-      // Deduplicate by song id
       const existingIds = new Set(p.songs.map((s) => s.id));
       const newSongs = songs.filter((s) => !existingIds.has(s.id));
       return { ...p, songs: [...p.songs, ...newSongs], updatedAt: Date.now() };
     });
     await persist(updated);
     set({ playlists: updated });
+    if (playlist) Analytics.addSongsToPlaylist(playlist.name, songs.length);
   },
 
   async removeSongFromPlaylist(playlistId, songId) {

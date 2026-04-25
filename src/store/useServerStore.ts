@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import { SubsonicClient } from '@api/SubsonicClient';
 import { syncAndroidAutoServer } from '@services/AndroidAutoConfig';
+import { Analytics } from '@services/Analytics';
 
 const STORAGE_KEY_CONFIGS = 'server_configs';
 const STORAGE_KEY_ACTIVE = 'active_server_id';
@@ -93,6 +94,7 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     const newActive = get().activeServerId ?? id;
     await AsyncStorage.setItem(STORAGE_KEY_ACTIVE, newActive);
     set({ servers: updated, activeServerId: newActive });
+    Analytics.saveServer(config.name, existing < 0);
     if (newActive === id) {
       syncAndroidAutoServer(config, password);
     }
@@ -112,6 +114,8 @@ export const useServerStore = create<ServerStore>((set, get) => ({
       await AsyncStorage.setItem(STORAGE_KEY_ACTIVE, newActive ?? '');
     }
 
+    const deletedServer = servers.find((s) => s.id === id);
+    if (deletedServer) Analytics.deleteServer(deletedServer.name);
     set({ servers: updated, activeServerId: newActive });
     const activeServer = updated.find((s) => s.id === newActive);
     const password = activeServer ? await SecureStore.getItemAsync(passwordKey(activeServer.id)) : null;
@@ -122,6 +126,7 @@ export const useServerStore = create<ServerStore>((set, get) => ({
     await AsyncStorage.setItem(STORAGE_KEY_ACTIVE, id);
     set({ activeServerId: id });
     const activeServer = get().servers.find((s) => s.id === id);
+    if (activeServer) Analytics.switchServer(activeServer.name);
     const password = activeServer ? await SecureStore.getItemAsync(passwordKey(activeServer.id)) : null;
     syncAndroidAutoServer(activeServer ?? null, password);
   },

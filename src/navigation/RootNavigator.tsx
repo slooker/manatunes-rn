@@ -1,9 +1,10 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useRef } from 'react';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Analytics } from '@services/Analytics';
 
 import { BottomTabNavigator } from './BottomTabNavigator';
 import type { RootStackParamList, DrawerParamList } from './types';
@@ -13,6 +14,7 @@ import PlaylistsScreen from '@screens/PlaylistsScreen';
 import GenresScreen from '@screens/GenresScreen';
 import DownloadsScreen from '@screens/DownloadsScreen';
 import ServerSettingsScreen from '@screens/ServerSettingsScreen';
+import AudioSettingsScreen from '@screens/AudioSettingsScreen';
 import AboutScreen from '@screens/AboutScreen';
 import HelpScreen from '@screens/HelpScreen';
 import SearchScreen from '@screens/SearchScreen';
@@ -91,6 +93,11 @@ function DrawerNavigator() {
         options={{ drawerIcon: ({ color }) => <Text style={{ color }}>⬇️</Text> }}
       />
       <Drawer.Screen
+        name="AudioSettings"
+        component={AudioSettingsScreen}
+        options={{ title: 'Audio Settings', drawerIcon: ({ color }) => <Text style={{ color }}>🎚️</Text> }}
+      />
+      <Drawer.Screen
         name="About"
         component={AboutScreen}
         options={{ drawerIcon: ({ color }) => <Text style={{ color }}>ℹ️</Text> }}
@@ -105,8 +112,32 @@ function DrawerNavigator() {
 }
 
 export function RootNavigator() {
+  const navigationRef = useNavigationContainerRef();
+  const prevRouteRef = useRef<string | undefined>();
+
+  function handleStateChange() {
+    const route = navigationRef.getCurrentRoute();
+    if (!route || route.name === prevRouteRef.current) return;
+    prevRouteRef.current = route.name;
+
+    Analytics.screen(route.name);
+
+    const p = route.params as Record<string, string> | undefined;
+    if (route.name === 'ArtistDetail' && p) {
+      Analytics.openArtist(p.artistId, p.artistName);
+    } else if (route.name === 'AlbumDetail' && p) {
+      Analytics.openAlbum(p.albumId, p.albumName, p.artistName);
+    } else if (route.name === 'PlaylistDetail' && p) {
+      Analytics.openPlaylist(p.playlistId, p.playlistName);
+    }
+  }
+
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => { prevRouteRef.current = navigationRef.getCurrentRoute()?.name; }}
+      onStateChange={handleStateChange}
+    >
       <Stack.Navigator
         screenOptions={{
           headerStyle: HEADER_STYLE,

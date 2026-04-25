@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.gms.google-services"
 
 import java.util.Properties
 
@@ -100,8 +101,8 @@ android {
         applicationId 'us.slooker.manatunes'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 201
-        versionName "2.0.201"
+        versionCode 202
+        versionName "2.0.202"
     }
     signingConfigs {
         debug {

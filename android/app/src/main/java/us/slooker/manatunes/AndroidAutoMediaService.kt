@@ -922,7 +922,16 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
       get("/search3", "query" to query, "artistCount" to "10", "albumCount" to "10", "songCount" to "25")
         .optJSONObject("searchResult3") ?: JSONObject()
 
-    fun streamUrl(id: String): String = url("/stream", "id" to id)
+    fun streamUrl(id: String): String {
+      val replayGain = getSharedPreferences(AndroidAutoConfigModule.PREFS_NAME, 0)
+        .getString(AndroidAutoConfigModule.KEY_REPLAY_GAIN, "off")
+      return if (replayGain != null && replayGain != "off") {
+        val apiValue = if (replayGain == "track") "trackGain" else "albumGain"
+        url("/stream", "id" to id, "replayGain" to apiValue)
+      } else {
+        url("/stream", "id" to id)
+      }
+    }
     fun coverArtUrl(id: String): String = url("/getCoverArt", "id" to id)
 
     private fun get(endpoint: String, vararg params: Pair<String, String>): JSONObject {

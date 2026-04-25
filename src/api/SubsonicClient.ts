@@ -80,12 +80,13 @@ export class SubsonicClient {
 
   // ─── URL builders (no network call) ─────────────────────────────────────────
 
-  getStreamUrl(id: string, maxBitRate?: number, format?: string): string {
+  getStreamUrl(id: string, maxBitRate?: number, format?: string, replayGain?: string): string {
     const base = this.config.serverUrl.replace(/\/$/, '');
     const auth = buildAuthParams(this.config.username, this.config.password, CLIENT_NAME, API_VERSION);
     const params = new URLSearchParams({ ...auth, id });
     if (maxBitRate) params.set('maxBitRate', String(maxBitRate));
     if (format) params.set('format', format);
+    if (replayGain) params.set('replayGain', replayGain);
     return `${base}/rest/stream?${params}`;
   }
 

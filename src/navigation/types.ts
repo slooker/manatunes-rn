@@ -7,6 +7,7 @@ export type DrawerParamList = {
   Genres: undefined;
   Servers: undefined;
   Downloads: undefined;
+  AudioSettings: undefined;
   About: undefined;
   Help: undefined;
 };

@@ -34,6 +34,14 @@ class AndroidAutoConfigModule(private val reactContext: ReactApplicationContext)
       .apply()
   }
 
+  @ReactMethod
+  fun setReplayGainMode(mode: String) {
+    reactContext.getSharedPreferences(PREFS_NAME, 0)
+      .edit()
+      .putString(KEY_REPLAY_GAIN, mode)
+      .apply()
+  }
+
   companion object {
     const val PREFS_NAME = "manatunes_android_auto"
     const val KEY_ID = "id"
@@ -42,5 +50,6 @@ class AndroidAutoConfigModule(private val reactContext: ReactApplicationContext)
     const val KEY_USERNAME = "username"
     const val KEY_PASSWORD = "password"
     const val KEY_DOWNLOADED_ALBUMS = "downloaded_albums"
+    const val KEY_REPLAY_GAIN = "replay_gain"
   }
 }

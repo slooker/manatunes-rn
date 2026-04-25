@@ -13,6 +13,7 @@ type AndroidAutoConfigNative = {
   ): void;
   clearActiveServer(): void;
   setDownloadedAlbums(json: string): void;
+  setReplayGainMode(mode: string): void;
 };
 
 const nativeModule = NativeModules.AndroidAutoConfig as AndroidAutoConfigNative | undefined;
@@ -31,4 +32,9 @@ export function syncAndroidAutoServer(config: ServerConfig | null, password?: st
 export function syncAndroidAutoDownloads(albums: DownloadedAlbum[]) {
   if (Platform.OS !== 'android' || !nativeModule) return;
   nativeModule.setDownloadedAlbums(JSON.stringify(albums));
+}
+
+export function syncAndroidAutoReplayGain(mode: string) {
+  if (Platform.OS !== 'android' || !nativeModule) return;
+  nativeModule.setReplayGainMode(mode);
 }

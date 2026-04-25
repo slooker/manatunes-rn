@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import TrackPlayer, { RepeatMode, Track } from 'react-native-track-player';
 
 import type { Song, Album, Artist } from '@api/SubsonicTypes';
+import { useAudioSettingsStore } from '@store/useAudioSettingsStore';
 
 export interface ArtistContext {
   artists: Artist[];
@@ -33,14 +34,14 @@ interface PlaybackStore {
   setDuration(duration: number): void;
 
   // Playback actions (call TrackPlayer + update store)
-  playSong(song: Song, getStreamUrl: (id: string) => string, getCoverArtUrl: (id: string) => string): Promise<void>;
+  playSong(song: Song, getStreamUrl: (id: string, replayGain?: string) => string, getCoverArtUrl: (id: string) => string): Promise<void>;
   playSongs(
     songs: Song[],
     startIndex: number,
-    getStreamUrl: (id: string) => string,
+    getStreamUrl: (id: string, replayGain?: string) => string,
     getCoverArtUrl: (id: string) => string
   ): Promise<void>;
-  addToQueue(song: Song, getStreamUrl: (id: string) => string, getCoverArtUrl: (id: string) => string): Promise<void>;
+  addToQueue(song: Song, getStreamUrl: (id: string, replayGain?: string) => string, getCoverArtUrl: (id: string) => string): Promise<void>;
   togglePlayPause(): Promise<void>;
   skipToNext(): Promise<void>;
   skipToPrevious(): Promise<void>;
@@ -59,14 +60,21 @@ interface PlaybackStore {
   clearAlbumContext(): void;
 }
 
+function replayGainParam(): string | undefined {
+  const { replayGainMode } = useAudioSettingsStore.getState();
+  if (replayGainMode === 'track') return 'trackGain';
+  if (replayGainMode === 'album') return 'albumGain';
+  return undefined;
+}
+
 function songToTrack(
   song: Song,
-  getStreamUrl: (id: string) => string,
+  getStreamUrl: (id: string, replayGain?: string) => string,
   getCoverArtUrl: (id: string) => string
 ): Track {
   return {
     id: song.id,
-    url: getStreamUrl(song.id),
+    url: getStreamUrl(song.id, replayGainParam()),
     title: song.title,
     artist: song.artist,
     album: song.album,

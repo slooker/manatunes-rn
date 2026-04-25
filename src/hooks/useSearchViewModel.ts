@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { Artist, Album, Song } from '@api/SubsonicTypes';
 import { useRepository } from './useRepository';
+import { Analytics } from '@services/Analytics';
 
 export type SearchState =
   | { type: 'Idle' }
@@ -35,11 +36,15 @@ export function useSearchViewModel() {
 
         const result = await client.search3(text.trim(), 10, 10, 20);
         if (result.ok) {
+          const artists = result.data.artist ?? [];
+          const albums = result.data.album ?? [];
+          const songs = result.data.song ?? [];
+          Analytics.search(text.trim(), artists.length, albums.length, songs.length);
           setState({
             type: 'Results',
-            artists: result.data.artist ?? [],
-            albums: result.data.album ?? [],
-            songs: result.data.song ?? [],
+            artists,
+            albums,
+            songs,
           });
         } else if (!result.isNetworkError) {
           setState({ type: 'Error', message: result.message });

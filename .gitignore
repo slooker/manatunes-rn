@@ -26,6 +26,7 @@ ios/build/
 ios/Pods/
 
 # Signing credentials and local secrets
+android/app/google-services.json
 android/keystore.properties
 android/*.jks
 *.jks

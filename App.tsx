@@ -7,6 +7,7 @@ import TrackPlayer, { Capability } from 'react-native-track-player';
 import { RootNavigator } from '@navigation/RootNavigator';
 import { useServerStore } from '@store/useServerStore';
 import { useFavoritesStore } from '@store/useFavoritesStore';
+import { useAudioSettingsStore } from '@store/useAudioSettingsStore';
 import { usePlayback } from '@hooks/usePlayback';
 import { useRepository } from '@hooks/useRepository';
 import { QueuePersistence } from '@services/QueuePersistence';
@@ -41,8 +42,9 @@ export default function App() {
 
   useEffect(() => {
     async function setup() {
-      // Load server configs from storage
+      // Load server configs and audio settings from storage
       await loadFromStorage();
+      await useAudioSettingsStore.getState().loadFromStorage();
 
       // Set up TrackPlayer
       await TrackPlayer.setupPlayer({
