@@ -101,8 +101,8 @@ android {
         applicationId 'us.slooker.manatunes'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 202
-        versionName "2.0.202"
+        versionCode 205
+        versionName "2.0.205"
     }
     signingConfigs {
         debug {
