@@ -3,11 +3,25 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Patches the generated Podfile to enable use_modular_headers! globally.
- * Required by @react-native-firebase — Firebase pods (FirebaseCore,
- * FirebaseInstallations, GoogleUtilities, etc.) need module maps to be
- * importable from Swift when built as static libraries.
+ * Patches the generated Podfile to add :modular_headers => true for specific
+ * Firebase/Google pods. Global use_modular_headers! breaks React Native's C++
+ * pods (react_runtime redefinition). Targeted overrides fix Firebase without
+ * touching RN pods.
  */
+const FIREBASE_PODS = [
+  'FirebaseCore',
+  'FirebaseCoreInternal',
+  'FirebaseInstallations',
+  'FirebaseAnalytics',
+  'FirebaseSessions',
+  'GoogleAppMeasurement',
+  'GoogleDataTransport',
+  'GoogleUtilities',
+  'nanopb',
+  'PromisesObjC',
+  'PromisesSwift',
+];
+
 const withIosFirebase = (config) => {
   return withDangerousMod(config, [
     'ios',
@@ -15,10 +29,14 @@ const withIosFirebase = (config) => {
       const podfilePath = path.join(cfg.modRequest.platformProjectRoot, 'Podfile');
       let podfile = fs.readFileSync(podfilePath, 'utf8');
 
-      if (!podfile.includes('use_modular_headers!')) {
+      if (!podfile.includes('FirebaseCore, :modular_headers')) {
+        const patch = FIREBASE_PODS.map(
+          (pod) => `  pod '${pod}', :modular_headers => true`
+        ).join('\n') + '\n';
+
         podfile = podfile.replace(
-          /^(platform :ios,.+\n)/m,
-          `$1\nuse_modular_headers!\n`
+          /^(target .+ do\n)/m,
+          `$1${patch}`
         );
         fs.writeFileSync(podfilePath, podfile);
       }
