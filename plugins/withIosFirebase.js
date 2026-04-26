@@ -3,9 +3,10 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Patches the generated Podfile to add modular_headers for Google pods
- * required by @react-native-firebase. Without this, pod install fails with:
- * "FirebaseCoreInternal depends upon GoogleUtilities, which does not define modules."
+ * Patches the generated Podfile to enable use_modular_headers! globally.
+ * Required by @react-native-firebase — Firebase pods (FirebaseCore,
+ * FirebaseInstallations, GoogleUtilities, etc.) need module maps to be
+ * importable from Swift when built as static libraries.
  */
 const withIosFirebase = (config) => {
   return withDangerousMod(config, [
@@ -14,15 +15,10 @@ const withIosFirebase = (config) => {
       const podfilePath = path.join(cfg.modRequest.platformProjectRoot, 'Podfile');
       let podfile = fs.readFileSync(podfilePath, 'utf8');
 
-      const patch = `
-  pod 'GoogleUtilities', :modular_headers => true
-  pod 'GoogleDataTransport', :modular_headers => true
-`;
-
-      if (!podfile.includes('GoogleUtilities, :modular_headers')) {
+      if (!podfile.includes('use_modular_headers!')) {
         podfile = podfile.replace(
-          /^(target .+ do\n)/m,
-          `$1${patch}`
+          /^(platform :ios,.+\n)/m,
+          `$1\nuse_modular_headers!\n`
         );
         fs.writeFileSync(podfilePath, podfile);
       }
