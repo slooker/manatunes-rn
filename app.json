@@ -7,9 +7,21 @@
     "icon": "./assets/icon.png",
     "scheme": "manatunes",
     "platforms": [
-      "android"
+      "android",
+      "ios"
     ],
     "newArchEnabled": false,
+    "ios": {
+      "bundleIdentifier": "us.slooker.manatunes",
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio",
+          "audio"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -38,7 +50,13 @@
       ],
       "./plugins/withAndroidAuto",
       "./plugins/withAndroidIcons",
+      "./plugins/withIosFirebase",
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "fb29a0d3-aabb-4603-9844-69cd4de797f4"
+      }
+    }
   }
 }
