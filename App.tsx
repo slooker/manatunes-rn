@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, Component } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import TrackPlayer, { Capability } from 'react-native-track-player';
+import crashlytics from '@react-native-firebase/crashlytics';
 
 import { RootNavigator } from '@navigation/RootNavigator';
 import { useServerStore } from '@store/useServerStore';
@@ -12,6 +13,13 @@ import { usePlayback } from '@hooks/usePlayback';
 import { useRepository } from '@hooks/useRepository';
 import { QueuePersistence } from '@services/QueuePersistence';
 import { ActionSheetHost } from '@components/ActionSheetHost';
+
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error) { crashlytics().recordError(error); }
+  render() { return this.state.hasError ? null : this.props.children; }
+}
 
 function AppInner() {
   usePlayback(); // wire RNTP events → playback store
@@ -83,10 +91,12 @@ export default function App() {
   }, [loadFromStorage]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <AppInner />
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <AppInner />
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }

@@ -15,6 +15,7 @@ const FIREBASE_PODS = [
   'FirebaseInstallations',
   'FirebaseAnalytics',
   'FirebaseSessions',
+  'FirebaseCrashlytics',
   'GoogleAppMeasurement',
   'GoogleDataTransport',
   'GoogleUtilities',
