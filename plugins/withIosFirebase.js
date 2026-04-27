@@ -10,6 +10,7 @@ const path = require('path');
  */
 const FIREBASE_PODS = [
   'FirebaseCore',
+  'FirebaseCoreExtension',
   'FirebaseCoreInternal',
   'FirebaseInstallations',
   'FirebaseAnalytics',
