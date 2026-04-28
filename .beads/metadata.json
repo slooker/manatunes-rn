@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "manatunes_rn",
+  "project_id": "b5d33cc8-aacf-452e-af74-0851c5c16269"
+}
