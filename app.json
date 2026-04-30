@@ -13,6 +13,7 @@
     "newArchEnabled": false,
     "ios": {
       "bundleIdentifier": "us.slooker.manatunes",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "supportsTablet": false,
       "infoPlist": {
         "UIBackgroundModes": [
