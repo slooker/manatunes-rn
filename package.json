@@ -16,6 +16,7 @@
     "@react-native-community/slider": "4.5.6",
     "@react-native-firebase/analytics": "^20.5.0",
     "@react-native-firebase/app": "^20.5.0",
+    "@react-native-firebase/crashlytics": "^20.5.0",
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/drawer": "^6.7.2",
     "@react-navigation/native": "^6.1.18",

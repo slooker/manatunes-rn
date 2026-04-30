@@ -3,7 +3,8 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import TrackPlayer, { Capability } from 'react-native-track-player';
-import crashlytics from '@react-native-firebase/crashlytics';
+let crashlytics: typeof import('@react-native-firebase/crashlytics').default | null = null;
+try { crashlytics = require('@react-native-firebase/crashlytics').default; } catch {}
 
 import { RootNavigator } from '@navigation/RootNavigator';
 import { useServerStore } from '@store/useServerStore';
@@ -17,7 +18,7 @@ import { ActionSheetHost } from '@components/ActionSheetHost';
 class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
   static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(error: Error) { crashlytics().recordError(error); }
+  componentDidCatch(error: Error) { try { crashlytics?.()?.recordError(error); } catch {} }
   render() { return this.state.hasError ? null : this.props.children; }
 }
 
