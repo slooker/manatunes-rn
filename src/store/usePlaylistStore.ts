@@ -1,111 +1,86 @@
 import { create } from 'zustand';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { FavoriteSong } from './useFavoritesStore';
+import type { SubsonicClient } from '@api/SubsonicClient';
+import type { Playlist } from '@api/SubsonicTypes';
 import { Analytics } from '@services/Analytics';
 
-export interface LocalPlaylist {
-  id: string;
-  name: string;
-  songs: FavoriteSong[];
-  createdAt: number;
-  updatedAt: number;
-}
-
 interface PlaylistStore {
-  playlists: LocalPlaylist[];
+  playlists: Playlist[];
 
-  createPlaylist(name: string): Promise<LocalPlaylist>;
-  updatePlaylistName(id: string, name: string): Promise<void>;
-  deletePlaylist(id: string): Promise<void>;
-  addSongsToPlaylist(id: string, songs: FavoriteSong[]): Promise<void>;
-  removeSongFromPlaylist(playlistId: string, songId: string): Promise<void>;
-  reorderPlaylistSongs(playlistId: string, from: number, to: number): Promise<void>;
-
-  loadFromStorage(): Promise<void>;
+  syncFromServer(client: SubsonicClient): Promise<void>;
+  createPlaylist(client: SubsonicClient, name: string): Promise<Playlist>;
+  renamePlaylist(client: SubsonicClient, id: string, name: string): Promise<void>;
+  deletePlaylist(client: SubsonicClient, id: string): Promise<void>;
+  addSongsToPlaylist(client: SubsonicClient, id: string, songIds: string[]): Promise<void>;
+  removeSongFromPlaylist(client: SubsonicClient, id: string, songIndex: number): Promise<void>;
+  reorderPlaylistSongs(client: SubsonicClient, id: string, songIds: string[]): Promise<void>;
 }
 
-const STORAGE_KEY = 'playlists';
-
-function generateId(): string {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+function errorMessage(result: { isNetworkError: boolean; message?: string; error?: Error }): string {
+  return result.isNetworkError ? result.error?.message ?? 'Network error' : result.message ?? 'Unknown error';
 }
 
-async function persist(playlists: LocalPlaylist[]) {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(playlists));
+async function refreshPlaylistSummary(
+  client: SubsonicClient,
+  id: string,
+  set: (fn: (state: PlaylistStore) => Partial<PlaylistStore>) => void
+) {
+  const result = await client.getPlaylist(id);
+  if (!result.ok) return;
+  const { entry, ...summary } = result.data;
+  set((state) => ({
+    playlists: state.playlists.map((p) => (p.id === id ? { ...p, ...summary } : p)),
+  }));
 }
 
 export const usePlaylistStore = create<PlaylistStore>((set, get) => ({
   playlists: [],
 
-  async createPlaylist(name) {
-    const now = Date.now();
-    const playlist: LocalPlaylist = {
-      id: generateId(),
-      name,
-      songs: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    const updated = [...get().playlists, playlist];
-    await persist(updated);
-    set({ playlists: updated });
+  async syncFromServer(client) {
+    const result = await client.getPlaylists();
+    if (!result.ok) throw new Error(errorMessage(result));
+    set({ playlists: result.data.playlist ?? [] });
+  },
+
+  async createPlaylist(client, name) {
+    const result = await client.createPlaylist(name);
+    if (!result.ok) throw new Error(errorMessage(result));
+    set((state) => ({ playlists: [...state.playlists, result.data] }));
     Analytics.createPlaylist(name);
-    return playlist;
+    return result.data;
   },
 
-  async updatePlaylistName(id, name) {
-    const updated = get().playlists.map((p) =>
-      p.id === id ? { ...p, name, updatedAt: Date.now() } : p
-    );
-    await persist(updated);
-    set({ playlists: updated });
+  async renamePlaylist(client, id, name) {
+    const result = await client.updatePlaylist(id, { name });
+    if (!result.ok) throw new Error(errorMessage(result));
+    set((state) => ({
+      playlists: state.playlists.map((p) => (p.id === id ? { ...p, name } : p)),
+    }));
   },
 
-  async deletePlaylist(id) {
+  async deletePlaylist(client, id) {
     const deleted = get().playlists.find((p) => p.id === id);
-    const updated = get().playlists.filter((p) => p.id !== id);
-    await persist(updated);
-    set({ playlists: updated });
+    const result = await client.deletePlaylist(id);
+    if (!result.ok) throw new Error(errorMessage(result));
+    set((state) => ({ playlists: state.playlists.filter((p) => p.id !== id) }));
     if (deleted) Analytics.deletePlaylist(deleted.name);
   },
 
-  async addSongsToPlaylist(id, songs) {
+  async addSongsToPlaylist(client, id, songIds) {
     const playlist = get().playlists.find((p) => p.id === id);
-    const updated = get().playlists.map((p) => {
-      if (p.id !== id) return p;
-      const existingIds = new Set(p.songs.map((s) => s.id));
-      const newSongs = songs.filter((s) => !existingIds.has(s.id));
-      return { ...p, songs: [...p.songs, ...newSongs], updatedAt: Date.now() };
-    });
-    await persist(updated);
-    set({ playlists: updated });
-    if (playlist) Analytics.addSongsToPlaylist(playlist.name, songs.length);
+    const result = await client.updatePlaylist(id, { songIdToAdd: songIds });
+    if (!result.ok) throw new Error(errorMessage(result));
+    await refreshPlaylistSummary(client, id, set);
+    if (playlist) Analytics.addSongsToPlaylist(playlist.name, songIds.length);
   },
 
-  async removeSongFromPlaylist(playlistId, songId) {
-    const updated = get().playlists.map((p) =>
-      p.id === playlistId
-        ? { ...p, songs: p.songs.filter((s) => s.id !== songId), updatedAt: Date.now() }
-        : p
-    );
-    await persist(updated);
-    set({ playlists: updated });
+  async removeSongFromPlaylist(client, id, songIndex) {
+    const result = await client.updatePlaylist(id, { songIndexToRemove: [songIndex] });
+    if (!result.ok) throw new Error(errorMessage(result));
+    await refreshPlaylistSummary(client, id, set);
   },
 
-  async reorderPlaylistSongs(playlistId, from, to) {
-    const updated = get().playlists.map((p) => {
-      if (p.id !== playlistId) return p;
-      const songs = [...p.songs];
-      const [moved] = songs.splice(from, 1);
-      songs.splice(to, 0, moved);
-      return { ...p, songs, updatedAt: Date.now() };
-    });
-    await persist(updated);
-    set({ playlists: updated });
-  },
-
-  async loadFromStorage() {
-    const json = await AsyncStorage.getItem(STORAGE_KEY);
-    set({ playlists: json ? JSON.parse(json) : [] });
+  async reorderPlaylistSongs(client, id, songIds) {
+    const result = await client.replacePlaylistSongs(id, songIds);
+    if (!result.ok) throw new Error(errorMessage(result));
   },
 }));

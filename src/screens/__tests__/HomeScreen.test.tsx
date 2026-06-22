@@ -62,7 +62,7 @@ describe('HomeScreen', () => {
     mockState = { type: 'NoServer' };
     render(<HomeScreen />);
     expect(screen.getByTestId('no-server')).toBeTruthy();
-    expect(screen.getByText('No server configured.')).toBeTruthy();
+    expect(screen.getByText('No servers found.')).toBeTruthy();
   });
 
   test('shows error message on failure', () => {

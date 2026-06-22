@@ -1,99 +1,113 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePlaylistStore } from '../usePlaylistStore';
-import { createSong } from '@utils/testFixtures';
+import type { SubsonicClient } from '@api/SubsonicClient';
+import type { Playlist } from '@api/SubsonicTypes';
 
-beforeEach(async () => {
-  await AsyncStorage.clear();
+function createPlaylistFixture(overrides?: Partial<Playlist>): Playlist {
+  return { id: 'pl-1', name: 'Test Playlist', songCount: 0, ...overrides };
+}
+
+function createMockClient(): jest.Mocked<Pick<
+  SubsonicClient,
+  'getPlaylists' | 'getPlaylist' | 'createPlaylist' | 'updatePlaylist' | 'deletePlaylist' | 'replacePlaylistSongs'
+>> {
+  return {
+    getPlaylists: jest.fn(),
+    getPlaylist: jest.fn(),
+    createPlaylist: jest.fn(),
+    updatePlaylist: jest.fn(),
+    deletePlaylist: jest.fn(),
+    replacePlaylistSongs: jest.fn(),
+  };
+}
+
+beforeEach(() => {
   usePlaylistStore.setState({ playlists: [] });
 });
 
 describe('usePlaylistStore', () => {
-  test('createPlaylist generates playlist with unique ID', async () => {
-    const p1 = await usePlaylistStore.getState().createPlaylist('My List');
-    const p2 = await usePlaylistStore.getState().createPlaylist('Another List');
-    expect(p1.id).not.toBe(p2.id);
-    expect(p1.name).toBe('My List');
+  test('syncFromServer populates playlists from getPlaylists', async () => {
+    const client = createMockClient();
+    const playlists = [createPlaylistFixture({ id: 'pl-1' }), createPlaylistFixture({ id: 'pl-2' })];
+    client.getPlaylists.mockResolvedValue({ ok: true, data: { playlist: playlists } });
+
+    await usePlaylistStore.getState().syncFromServer(client as unknown as SubsonicClient);
+
+    expect(usePlaylistStore.getState().playlists).toEqual(playlists);
   });
 
-  test('createPlaylist sets creation timestamp', async () => {
-    const before = Date.now();
-    const p = await usePlaylistStore.getState().createPlaylist('Test');
-    const after = Date.now();
-    expect(p.createdAt).toBeGreaterThanOrEqual(before);
-    expect(p.createdAt).toBeLessThanOrEqual(after);
+  test('syncFromServer throws on server error', async () => {
+    const client = createMockClient();
+    client.getPlaylists.mockResolvedValue({ ok: false, isNetworkError: false, code: 50, message: 'denied' });
+
+    await expect(usePlaylistStore.getState().syncFromServer(client as unknown as SubsonicClient)).rejects.toThrow(
+      'denied'
+    );
   });
 
-  test('createPlaylist persists to AsyncStorage', async () => {
-    await usePlaylistStore.getState().createPlaylist('My List');
-    const stored = await AsyncStorage.getItem('playlists');
-    const parsed = JSON.parse(stored!);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].name).toBe('My List');
+  test('createPlaylist calls client.createPlaylist and appends the result', async () => {
+    const client = createMockClient();
+    const created = createPlaylistFixture({ id: 'pl-new', name: 'My List' });
+    client.createPlaylist.mockResolvedValue({ ok: true, data: created });
+
+    const result = await usePlaylistStore.getState().createPlaylist(client as unknown as SubsonicClient, 'My List');
+
+    expect(client.createPlaylist).toHaveBeenCalledWith('My List');
+    expect(result).toEqual(created);
+    expect(usePlaylistStore.getState().playlists).toEqual([created]);
   });
 
-  test('getPlaylists returns empty list when no playlists exist', () => {
-    expect(usePlaylistStore.getState().playlists).toHaveLength(0);
+  test('renamePlaylist patches the matching playlist', async () => {
+    usePlaylistStore.setState({ playlists: [createPlaylistFixture({ id: 'pl-1', name: 'Old' })] });
+    const client = createMockClient();
+    client.updatePlaylist.mockResolvedValue({ ok: true, data: undefined });
+
+    await usePlaylistStore.getState().renamePlaylist(client as unknown as SubsonicClient, 'pl-1', 'New');
+
+    expect(client.updatePlaylist).toHaveBeenCalledWith('pl-1', { name: 'New' });
+    expect(usePlaylistStore.getState().playlists[0].name).toBe('New');
   });
 
-  test('addSongsToPlaylist adds songs and persists', async () => {
-    const p = await usePlaylistStore.getState().createPlaylist('Test');
-    const songs = [createSong({ id: 's1' }), createSong({ id: 's2' })];
-    await usePlaylistStore.getState().addSongsToPlaylist(p.id, songs);
-    const playlist = usePlaylistStore.getState().playlists.find((pl) => pl.id === p.id);
-    expect(playlist?.songs).toHaveLength(2);
+  test('deletePlaylist removes the matching playlist', async () => {
+    usePlaylistStore.setState({ playlists: [createPlaylistFixture({ id: 'pl-1' }), createPlaylistFixture({ id: 'pl-2' })] });
+    const client = createMockClient();
+    client.deletePlaylist.mockResolvedValue({ ok: true, data: undefined });
+
+    await usePlaylistStore.getState().deletePlaylist(client as unknown as SubsonicClient, 'pl-1');
+
+    expect(client.deletePlaylist).toHaveBeenCalledWith('pl-1');
+    expect(usePlaylistStore.getState().playlists.map((p) => p.id)).toEqual(['pl-2']);
   });
 
-  test('addSongsToPlaylist deduplicates by song id', async () => {
-    const p = await usePlaylistStore.getState().createPlaylist('Test');
-    const song = createSong({ id: 's1' });
-    await usePlaylistStore.getState().addSongsToPlaylist(p.id, [song]);
-    await usePlaylistStore.getState().addSongsToPlaylist(p.id, [song]);
-    const playlist = usePlaylistStore.getState().playlists.find((pl) => pl.id === p.id);
-    expect(playlist?.songs).toHaveLength(1);
+  test('addSongsToPlaylist calls updatePlaylist with songIdToAdd and refreshes songCount', async () => {
+    usePlaylistStore.setState({ playlists: [createPlaylistFixture({ id: 'pl-1', songCount: 1 })] });
+    const client = createMockClient();
+    client.updatePlaylist.mockResolvedValue({ ok: true, data: undefined });
+    client.getPlaylist.mockResolvedValue({ ok: true, data: createPlaylistFixture({ id: 'pl-1', songCount: 3 }) });
+
+    await usePlaylistStore.getState().addSongsToPlaylist(client as unknown as SubsonicClient, 'pl-1', ['s1', 's2']);
+
+    expect(client.updatePlaylist).toHaveBeenCalledWith('pl-1', { songIdToAdd: ['s1', 's2'] });
+    expect(usePlaylistStore.getState().playlists[0].songCount).toBe(3);
   });
 
-  test('removeSongFromPlaylist removes and persists', async () => {
-    const p = await usePlaylistStore.getState().createPlaylist('Test');
-    await usePlaylistStore.getState().addSongsToPlaylist(p.id, [createSong({ id: 's1' }), createSong({ id: 's2' })]);
-    await usePlaylistStore.getState().removeSongFromPlaylist(p.id, 's1');
-    const playlist = usePlaylistStore.getState().playlists.find((pl) => pl.id === p.id);
-    expect(playlist?.songs).toHaveLength(1);
-    expect(playlist?.songs[0].id).toBe('s2');
+  test('removeSongFromPlaylist calls updatePlaylist with songIndexToRemove and refreshes songCount', async () => {
+    usePlaylistStore.setState({ playlists: [createPlaylistFixture({ id: 'pl-1', songCount: 3 })] });
+    const client = createMockClient();
+    client.updatePlaylist.mockResolvedValue({ ok: true, data: undefined });
+    client.getPlaylist.mockResolvedValue({ ok: true, data: createPlaylistFixture({ id: 'pl-1', songCount: 2 }) });
+
+    await usePlaylistStore.getState().removeSongFromPlaylist(client as unknown as SubsonicClient, 'pl-1', 1);
+
+    expect(client.updatePlaylist).toHaveBeenCalledWith('pl-1', { songIndexToRemove: [1] });
+    expect(usePlaylistStore.getState().playlists[0].songCount).toBe(2);
   });
 
-  test('deletePlaylist removes from store and storage', async () => {
-    const p = await usePlaylistStore.getState().createPlaylist('Test');
-    await usePlaylistStore.getState().deletePlaylist(p.id);
-    expect(usePlaylistStore.getState().playlists).toHaveLength(0);
-    const stored = await AsyncStorage.getItem('playlists');
-    expect(JSON.parse(stored!)).toHaveLength(0);
-  });
+  test('reorderPlaylistSongs calls replacePlaylistSongs with the given id order', async () => {
+    const client = createMockClient();
+    client.replacePlaylistSongs.mockResolvedValue({ ok: true, data: createPlaylistFixture() });
 
-  test('updatePlaylistName persists to storage', async () => {
-    const p = await usePlaylistStore.getState().createPlaylist('Old Name');
-    await usePlaylistStore.getState().updatePlaylistName(p.id, 'New Name');
-    const playlist = usePlaylistStore.getState().playlists.find((pl) => pl.id === p.id);
-    expect(playlist?.name).toBe('New Name');
-    const stored = await AsyncStorage.getItem('playlists');
-    expect(JSON.parse(stored!)[0].name).toBe('New Name');
-  });
+    await usePlaylistStore.getState().reorderPlaylistSongs(client as unknown as SubsonicClient, 'pl-1', ['s2', 's1']);
 
-  test('reorderPlaylistSongs moves song and persists', async () => {
-    const p = await usePlaylistStore.getState().createPlaylist('Test');
-    const songs = [createSong({ id: 's1' }), createSong({ id: 's2' }), createSong({ id: 's3' })];
-    await usePlaylistStore.getState().addSongsToPlaylist(p.id, songs);
-    await usePlaylistStore.getState().reorderPlaylistSongs(p.id, 0, 2);
-    const playlist = usePlaylistStore.getState().playlists.find((pl) => pl.id === p.id);
-    expect(playlist?.songs[0].id).toBe('s2');
-    expect(playlist?.songs[2].id).toBe('s1');
-  });
-
-  test('multiple playlists can be created with distinct IDs', async () => {
-    const p1 = await usePlaylistStore.getState().createPlaylist('A');
-    const p2 = await usePlaylistStore.getState().createPlaylist('B');
-    const p3 = await usePlaylistStore.getState().createPlaylist('C');
-    const ids = [p1.id, p2.id, p3.id];
-    const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toBe(3);
+    expect(client.replacePlaylistSongs).toHaveBeenCalledWith('pl-1', ['s2', 's1']);
   });
 });

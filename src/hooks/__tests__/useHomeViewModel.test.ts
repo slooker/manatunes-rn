@@ -9,6 +9,7 @@ const mockClient = {
 
 jest.mock('../useRepository', () => ({
   useRepository: () => mockClient,
+  useRepositoryState: () => ({ client: mockClient, isLoading: false, missingCredentials: false }),
 }));
 
 jest.mock('@store/useServerStore', () => ({
@@ -16,6 +17,7 @@ jest.mock('@store/useServerStore', () => ({
     selector({
       getActiveServer: () => ({ id: 's1', name: 'Home', url: 'http://test', username: 'user' }),
       activeServerId: 's1',
+      isLoaded: true,
     }),
 }));
 

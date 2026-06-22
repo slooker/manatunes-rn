@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,31 +13,72 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { usePlaylistStore } from '@store/usePlaylistStore';
+import { useRepository } from '@hooks/useRepository';
+import { useNoServerRedirect } from '@hooks/useNoServerRedirect';
+import { LoadingScreen } from '@components/LoadingScreen';
+import { ErrorScreen } from '@components/ErrorScreen';
+import { NoServerScreen } from '@components/NoServerScreen';
 import { MiniPlayer } from '@components/MiniPlayer';
 
 export default function PlaylistsScreen() {
   const navigation = useNavigation<any>();
-  const { playlists, createPlaylist, deletePlaylist, loadFromStorage } = usePlaylistStore();
+  const client = useRepository();
+  const { hasNoServers, goToServers } = useNoServerRedirect(navigation);
+  const { playlists, createPlaylist, deletePlaylist, syncFromServer } = usePlaylistStore();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
 
+  const load = useCallback(() => {
+    if (!client) return;
+    setLoading(true);
+    setError(null);
+    syncFromServer(client)
+      .then(() => setLoading(false))
+      .catch((e: Error) => {
+        setLoading(false);
+        setError(e.message);
+      });
+  }, [client, syncFromServer]);
+
   useEffect(() => {
-    loadFromStorage();
-  }, []);
+    load();
+  }, [load]);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
-    await createPlaylist(newName.trim());
+    if (!newName.trim() || !client) return;
+    const name = newName.trim();
     setNewName('');
     setCreating(false);
+    try {
+      await createPlaylist(client, name);
+    } catch (e) {
+      Alert.alert('Create playlist failed', (e as Error).message);
+    }
   };
 
   const handleDelete = (id: string, name: string) => {
     Alert.alert('Delete Playlist', `Delete "${name}"?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deletePlaylist(id) },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          if (!client) return;
+          try {
+            await deletePlaylist(client, id);
+          } catch (e) {
+            Alert.alert('Delete playlist failed', (e as Error).message);
+          }
+        },
+      },
     ]);
   };
+
+  if (hasNoServers) return <NoServerScreen onAddServer={goToServers} />;
+  if (loading) return <LoadingScreen />;
+  if (error) return <ErrorScreen message={error} onRetry={load} />;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -53,7 +94,7 @@ export default function PlaylistsScreen() {
           >
             <View style={styles.info}>
               <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.count}>{item.songs.length} songs</Text>
+              <Text style={styles.count}>{item.songCount ?? 0} songs</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
           </TouchableOpacity>

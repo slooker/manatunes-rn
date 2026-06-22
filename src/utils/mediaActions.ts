@@ -21,7 +21,7 @@ function toFavoriteSong(song: Song): FavoriteSong {
   };
 }
 
-function choosePlaylist(songs: FavoriteSong[]) {
+function choosePlaylist(songs: FavoriteSong[], client: SubsonicClient) {
   const { playlists, addSongsToPlaylist } = usePlaylistStore.getState();
   const { showActionSheet } = useActionSheetStore.getState();
 
@@ -34,7 +34,10 @@ function choosePlaylist(songs: FavoriteSong[]) {
     'Add to playlist',
     playlists.map((playlist) => ({
       label: playlist.name,
-      onPress: () => addSongsToPlaylist(playlist.id, songs),
+      onPress: () =>
+        addSongsToPlaylist(client, playlist.id, songs.map((s) => s.id)).catch((e: Error) => {
+          Alert.alert('Add to playlist failed', e.message);
+        }),
     }))
   );
 }
@@ -54,7 +57,7 @@ export function showSongActions(song: Song, client: SubsonicClient) {
       label: 'Add to queue',
       onPress: () => addToQueue(song, (id) => client.getStreamUrl(id), (id) => client.getCoverArtUrl(id)),
     },
-    { label: 'Add to playlist', onPress: () => choosePlaylist([favoriteSong]) },
+    { label: 'Add to playlist', onPress: () => choosePlaylist([favoriteSong], client) },
     {
       label: isSongFavorite(song.id) ? 'Remove from favorites' : 'Add to favorites',
       onPress: () =>
@@ -99,7 +102,7 @@ export function showAlbumActions(album: Album, client: SubsonicClient) {
       label: 'Add to playlist',
       onPress: async () => {
         const songs = await loadSongs();
-        if (songs.length > 0) choosePlaylist(songs.map(toFavoriteSong));
+        if (songs.length > 0) choosePlaylist(songs.map(toFavoriteSong), client);
       },
     },
     {
@@ -170,7 +173,7 @@ export function showArtistActions(artist: Artist, client: SubsonicClient) {
       label: 'Add to playlist',
       onPress: async () => {
         const songs = await loadSongs();
-        if (songs.length > 0) choosePlaylist(songs.map(toFavoriteSong));
+        if (songs.length > 0) choosePlaylist(songs.map(toFavoriteSong), client);
       },
     },
     {

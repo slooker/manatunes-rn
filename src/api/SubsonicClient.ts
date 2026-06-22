@@ -48,16 +48,22 @@ export class SubsonicClient {
 
   private async get<T>(
     endpoint: string,
-    params: Record<string, string | number | undefined> = {}
+    params: Record<string, string | number | boolean | string[] | number[] | undefined> = {}
   ): Promise<SubsonicResult<T>> {
     try {
-      const cleanParams: Record<string, string | number> = {};
+      const usp = new URLSearchParams();
+      for (const [k, v] of Object.entries(this.authParams())) usp.append(k, v);
       for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined) cleanParams[k] = v;
+        if (v === undefined) continue;
+        if (Array.isArray(v)) {
+          for (const item of v) usp.append(k, String(item));
+        } else {
+          usp.append(k, String(v));
+        }
       }
 
       const response = await this.http.get<SubsonicResponse<T>>(endpoint, {
-        params: { ...this.authParams(), ...cleanParams },
+        params: usp,
       });
 
       const body = response.data['subsonic-response'];
@@ -211,6 +217,40 @@ export class SubsonicClient {
 
   async getPlaylist(id: string): Promise<SubsonicResult<Playlist>> {
     const result = await this.get<{ playlist: Playlist }>('/getPlaylist', { id });
+    if (!result.ok) return result as SubsonicResult<Playlist>;
+    return { ok: true, data: (result.data as any).playlist };
+  }
+
+  async createPlaylist(name: string, songIds: string[] = []): Promise<SubsonicResult<Playlist>> {
+    const result = await this.get<{ playlist: Playlist }>('/createPlaylist', { name, songId: songIds });
+    if (!result.ok) return result as SubsonicResult<Playlist>;
+    return { ok: true, data: (result.data as any).playlist };
+  }
+
+  async updatePlaylist(
+    playlistId: string,
+    options: { name?: string; songIdToAdd?: string[]; songIndexToRemove?: number[] } = {}
+  ): Promise<SubsonicResult<void>> {
+    const result = await this.get<void>('/updatePlaylist', {
+      playlistId,
+      name: options.name,
+      songIdToAdd: options.songIdToAdd,
+      songIndexToRemove: options.songIndexToRemove,
+    });
+    if (!result.ok) return result as SubsonicResult<void>;
+    return { ok: true, data: undefined };
+  }
+
+  async deletePlaylist(id: string): Promise<SubsonicResult<void>> {
+    const result = await this.get<void>('/deletePlaylist', { id });
+    if (!result.ok) return result as SubsonicResult<void>;
+    return { ok: true, data: undefined };
+  }
+
+  // Replaces a playlist's entire track list/order. createPlaylist with an existing
+  // playlistId rewrites the song list in full — there's no dedicated "move song" endpoint.
+  async replacePlaylistSongs(playlistId: string, songIds: string[]): Promise<SubsonicResult<Playlist>> {
+    const result = await this.get<{ playlist: Playlist }>('/createPlaylist', { playlistId, songId: songIds });
     if (!result.ok) return result as SubsonicResult<Playlist>;
     return { ok: true, data: (result.data as any).playlist };
   }
