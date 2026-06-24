@@ -26,7 +26,7 @@ if [[ "$INSTALL_ONLY" == true && ( "$BUILD_TARGET" == "bundle" || "$INSTALL" == 
   exit 1
 fi
 
-export JAVA_HOME="${JAVA_HOME:-/c/Users/shawn/jdks/microsoft-jdk-17}"
+export JAVA_HOME="${JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}"
 export ANDROID_HOME="${ANDROID_HOME:-/c/Users/shawn/AppData/Local/Android/Sdk}"
 export NODE_ENV="${NODE_ENV:-production}"
 export PATH="$JAVA_HOME/bin:/c/nvm4w/nodejs:$PATH"
