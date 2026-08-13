@@ -254,4 +254,10 @@ export class SubsonicClient {
     if (!result.ok) return result as SubsonicResult<Playlist>;
     return { ok: true, data: (result.data as any).playlist };
   }
+
+  async scrobble(id: string, submission: boolean, time?: number): Promise<SubsonicResult<void>> {
+    const result = await this.get<void>('/scrobble', { id, submission, time });
+    if (!result.ok) return result as SubsonicResult<void>;
+    return { ok: true, data: undefined };
+  }
 }

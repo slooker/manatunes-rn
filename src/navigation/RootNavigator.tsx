@@ -15,6 +15,7 @@ import GenresScreen from '@screens/GenresScreen';
 import DownloadsScreen from '@screens/DownloadsScreen';
 import ServerSettingsScreen from '@screens/ServerSettingsScreen';
 import AudioSettingsScreen from '@screens/AudioSettingsScreen';
+import ScrobblingScreen from '@screens/ScrobblingScreen';
 import AboutScreen from '@screens/AboutScreen';
 import HelpScreen from '@screens/HelpScreen';
 import SearchScreen from '@screens/SearchScreen';
@@ -98,6 +99,11 @@ function DrawerNavigator() {
         options={{ title: 'Audio Settings', drawerIcon: ({ color }) => <Text style={{ color }}>🎚️</Text> }}
       />
       <Drawer.Screen
+        name="Scrobbling"
+        component={ScrobblingScreen}
+        options={{ title: 'Scrobbling', drawerIcon: ({ color }) => <Text style={{ color }}>📡</Text> }}
+      />
+      <Drawer.Screen
         name="About"
         component={AboutScreen}
         options={{ drawerIcon: ({ color }) => <Text style={{ color }}>ℹ️</Text> }}
@@ -113,7 +119,7 @@ function DrawerNavigator() {
 
 export function RootNavigator() {
   const navigationRef = useNavigationContainerRef();
-  const prevRouteRef = useRef<string | undefined>();
+  const prevRouteRef = useRef<string | undefined>(undefined);
 
   function handleStateChange() {
     const route = navigationRef.getCurrentRoute();

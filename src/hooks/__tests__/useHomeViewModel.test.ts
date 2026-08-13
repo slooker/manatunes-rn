@@ -113,6 +113,7 @@ describe('useHomeViewModel', () => {
     act(() => { result.current.load(); });
     expect(result.current.state.type).toBe('Loading');
     resolvePromise({ ok: true, data: { album: [] } });
+    await waitFor(() => expect(result.current.state.type).toBe('Success'));
   });
 
   test('NoServer state when no server configured', () => {

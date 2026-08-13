@@ -9,6 +9,10 @@
     "test:watch": "jest --watchAll",
     "prebuild": "expo prebuild --platform android",
     "build:android": "eas build --platform android",
+    "auto:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android-auto.ps1 -Mode doctor",
+    "auto:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android-auto.ps1 -Mode start",
+    "auto:sessions": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android-auto.ps1 -Mode sessions",
+    "auto:logs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android-auto.ps1 -Mode logs",
     "ios": "expo run:ios"
   },
   "dependencies": {

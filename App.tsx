@@ -10,6 +10,7 @@ import { RootNavigator } from '@navigation/RootNavigator';
 import { useServerStore } from '@store/useServerStore';
 import { useFavoritesStore } from '@store/useFavoritesStore';
 import { useAudioSettingsStore } from '@store/useAudioSettingsStore';
+import { useScrobbleStore } from '@store/useScrobbleStore';
 import { usePlayback } from '@hooks/usePlayback';
 import { useRepository } from '@hooks/useRepository';
 import { QueuePersistence } from '@services/QueuePersistence';
@@ -23,9 +24,8 @@ class ErrorBoundary extends Component<{ children: React.ReactNode }, { hasError:
 }
 
 function AppInner() {
-  usePlayback(); // wire RNTP events → playback store
-
   const client = useRepository();
+  usePlayback(client); // wire RNTP events → playback store (also reports scrobbles)
   const loadFavoritesFromStorage = useFavoritesStore((s) => s.loadFromStorage);
   const syncFavoritesFromServer = useFavoritesStore((s) => s.syncFromServer);
 
@@ -54,6 +54,7 @@ export default function App() {
       // Load server configs and audio settings from storage
       await loadFromStorage();
       await useAudioSettingsStore.getState().loadFromStorage();
+      await useScrobbleStore.getState().loadFromStorage();
 
       // Set up TrackPlayer
       await TrackPlayer.setupPlayer({

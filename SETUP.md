@@ -71,12 +71,61 @@ npm run test:watch    # watch mode
 
 ## Android Auto Testing
 
-Use the Desktop Head Unit (DHU) emulator from the Android Automotive SDK:
+Use Google's Desktop Head Unit (DHU) to run the phone's real Android Auto experience in a window on this computer. A physical Android phone is still required, but the car is not.
 
-1. Install: Android Studio → SDK Manager → SDK Tools → Android Automotive Desktop Head Unit
-2. Connect phone via USB with Android Auto enabled
-3. Start DHU: `$ANDROID_SDK/extras/google/auto/desktop-head-unit`
-4. ManaTunes should appear in the media apps list
+The DHU package is installed from Android Studio > SDK Manager > SDK Tools > **Android Auto Desktop Head Unit Emulator**. On Windows it is installed at:
+
+```text
+%LOCALAPPDATA%\Android\Sdk\extras\google\auto\desktop-head-unit.exe
+```
+
+### One-time phone setup
+
+1. Update Android Auto from the Play Store and make sure the phone is signed in.
+2. Open Android Auto settings on the phone.
+3. Scroll to **Version** and tap it repeatedly until developer mode is enabled.
+4. Open the three-dot menu > **Developer settings**.
+5. Enable **Unknown sources** if a locally installed debug build of ManaTunes does not appear.
+6. Return to the three-dot menu and choose **Start head unit server**.
+7. Under **Previously connected cars**, make sure **Add new cars to Android Auto** is enabled.
+
+### Build, install, and launch
+
+Connect the unlocked phone over USB, accept its USB debugging prompt, then run:
+
+```powershell
+npm run auto:doctor
+npx expo run:android
+npm run auto:start
+```
+
+If Windows PowerShell reports that `npm.ps1` cannot run because script execution is disabled, use `npm.cmd` in these commands (for example, `npm.cmd run auto:start`). No global execution-policy change is required.
+
+`auto:start` establishes the required ADB tunnel on port 5277 and opens DHU. Check the phone for first-run terms and permission prompts. ManaTunes should then appear in Android Auto's app launcher under media apps.
+
+If Metro is not already running after installation, start it separately:
+
+```powershell
+npm start
+```
+
+### Voice-command test
+
+1. Open ManaTunes in DHU and start or select it as the active media app.
+2. Activate Gemini by saying **Hey Google**, clicking DHU's microphone, or using the DHU control that represents the steering-wheel voice button.
+3. Say **Play [exact song title]**.
+4. Then try **Play [artist] on ManaTunes**.
+
+The first command tests routing to the currently selected media app. The second tests whether Gemini can select ManaTunes by name.
+
+For diagnostics, use separate terminals:
+
+```powershell
+npm run auto:sessions  # snapshot active MediaSessions and playback actions
+npm run auto:logs      # stream focused Android Auto/ManaTunes logs
+```
+
+If `auto:doctor` reports no phone, run the SDK's `adb devices` command, unlock the phone, and accept the authorization dialog. If DHU cannot connect, confirm **Start head unit server** is still active and rerun `npm run auto:start`.
 
 ---
 

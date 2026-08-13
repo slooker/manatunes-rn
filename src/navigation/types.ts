@@ -8,6 +8,7 @@ export type DrawerParamList = {
   Servers: undefined;
   Downloads: undefined;
   AudioSettings: undefined;
+  Scrobbling: undefined;
   About: undefined;
   Help: undefined;
 };

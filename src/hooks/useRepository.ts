@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SubsonicClient } from '@api/SubsonicClient';
+import { NavidromeClient } from '@api/NavidromeClient';
 import { useServerStore } from '@store/useServerStore';
 
 interface RepositoryState {
@@ -64,6 +65,45 @@ export function useRepositoryState(): RepositoryState {
 
 export function useRepository(): SubsonicClient | null {
   return useRepositoryState().client;
+}
+
+/**
+ * Returns a NavidromeClient (Navidrome's native API, not the Subsonic API) built from
+ * the active server config. Used for actions the Subsonic API doesn't expose, like
+ * linking a ListenBrainz account. Returns null if no server is configured.
+ */
+export function useNavidromeClient(): NavidromeClient | null {
+  const { getActiveServer, getPassword } = useServerStore();
+  const [client, setClient] = useState<NavidromeClient | null>(null);
+  const activeServer = getActiveServer();
+  const serverId = activeServer?.id;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activeServer) {
+      setClient(null);
+      return;
+    }
+
+    setClient(null);
+    getPassword(activeServer.id).then((password) => {
+      if (cancelled || !password) return;
+      setClient(
+        new NavidromeClient({
+          serverUrl: activeServer.url,
+          username: activeServer.username,
+          password,
+        })
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return client;
 }
 
 /**

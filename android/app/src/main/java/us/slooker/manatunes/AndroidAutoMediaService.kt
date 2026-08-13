@@ -183,6 +183,19 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
           .map { albumItem(it, "${PREFIX_ALBUM}${it.id}") }
           .toMutableList()
 
+      parentId == MEDIA_ID_PLAYLISTS ->
+        client.getPlaylists().map(::playlistFromJson).map(::playlistItem).toMutableList()
+
+      parentId.startsWith(PREFIX_PLAYLIST) -> {
+        val playlistId = parentId.removePrefix(PREFIX_PLAYLIST)
+        client.getPlaylist(playlistId)
+          .optJSONArray("entry")
+          .orEmptyObjects()
+          .map(::songFromJson)
+          .map { song -> songItem(song, "${PREFIX_PLAYLIST_SONG}${playlistId}${MEDIA_ID_SEPARATOR}${song.id}") }
+          .toMutableList()
+      }
+
       parentId == MEDIA_ID_FAVORITES -> mutableListOf(
         browseItem(MEDIA_ID_FAVORITE_ARTISTS, "Favorite Artists", "Artists starred in Navidrome"),
         browseItem(MEDIA_ID_FAVORITE_ALBUMS, "Favorite Albums", "Albums starred in Navidrome"),
@@ -259,11 +272,16 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         when {
           mediaId.startsWith(PREFIX_SEARCH_SONG) -> playSearchSong(mediaId, client)
           mediaId.startsWith(PREFIX_ALBUM_SONG) -> playAlbumSong(mediaId, client)
+          mediaId.startsWith(PREFIX_PLAYLIST_SONG) -> playPlaylistSong(mediaId, client)
           mediaId.startsWith(PREFIX_FAVORITE_SONG) -> playFavoriteSong(mediaId, client)
           mediaId.startsWith(PREFIX_GENRE_SONG) -> playGenreSong(mediaId, client)
           mediaId.startsWith(PREFIX_SONG) -> playQueue(listOf(client.getSong(mediaId.removePrefix(PREFIX_SONG)).let(::songFromJson)), 0, client)
           mediaId.startsWith(PREFIX_ALBUM) -> {
             val songs = client.getAlbum(mediaId.removePrefix(PREFIX_ALBUM)).optJSONArray("song").orEmptyObjects().map(::songFromJson)
+            playQueue(songs, 0, client)
+          }
+          mediaId.startsWith(PREFIX_PLAYLIST) -> {
+            val songs = client.getPlaylist(mediaId.removePrefix(PREFIX_PLAYLIST)).optJSONArray("entry").orEmptyObjects().map(::songFromJson)
             playQueue(songs, 0, client)
           }
           mediaId.startsWith(PREFIX_ARTIST) -> {
@@ -293,6 +311,15 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     val albumId = parts.getOrNull(0) ?: return
     val songId = parts.getOrNull(1) ?: return
     val songs = client.getAlbum(albumId).optJSONArray("song").orEmptyObjects().map(::songFromJson)
+    val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
+    playQueue(songs, index, client)
+  }
+
+  private fun playPlaylistSong(mediaId: String, client: AutoSubsonicClient) {
+    val parts = mediaId.removePrefix(PREFIX_PLAYLIST_SONG).split(MEDIA_ID_SEPARATOR, limit = 2)
+    val playlistId = parts.getOrNull(0) ?: return
+    val songId = parts.getOrNull(1) ?: return
+    val songs = client.getPlaylist(playlistId).optJSONArray("entry").orEmptyObjects().map(::songFromJson)
     val index = songs.indexOfFirst { it.id == songId }.takeIf { it >= 0 } ?: 0
     playQueue(songs, index, client)
   }
@@ -732,6 +759,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
   private fun rootItems() = mutableListOf(
     browseItem(MEDIA_ID_ARTISTS, "Artists", "Browse all artists"),
     browseItem(MEDIA_ID_ALBUMS, "Albums", "Browse albums"),
+    browseItem(MEDIA_ID_PLAYLISTS, "Playlists", "Browse your playlists"),
     browseItem(MEDIA_ID_GENRES, "Genres", "Browse by genre"),
     browseItem(MEDIA_ID_FAVORITES, "Favorites", "Browse starred music"),
     browseItem(MEDIA_ID_DOWNLOADED, "Downloaded", "Browse downloaded music")
@@ -757,6 +785,9 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
         .build(),
       MediaBrowserCompat.MediaItem.FLAG_BROWSABLE
     )
+
+  private fun playlistItem(playlist: AutoPlaylist) =
+    browseItem("${PREFIX_PLAYLIST}${playlist.id}", playlist.name, "${playlist.songCount ?: 0} songs")
 
   private fun songItem(song: AutoSong, mediaId: String = "${PREFIX_SONG}${song.id}") =
     MediaBrowserCompat.MediaItem(
@@ -851,6 +882,12 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     artist = json.optString("artist").takeIf { it.isNotBlank() }
   )
 
+  private fun playlistFromJson(json: JSONObject) = AutoPlaylist(
+    id = json.optString("id"),
+    name = json.optString("name", "Unknown Playlist"),
+    songCount = json.optInt("songCount").takeIf { json.has("songCount") }
+  )
+
   private fun songFromJson(json: JSONObject) = AutoSong(
     id = json.optString("id"),
     title = json.optString("title", "Unknown Track"),
@@ -862,6 +899,7 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
 
   private data class AutoArtist(val id: String, val name: String, val albumCount: Int?)
   private data class AutoAlbum(val id: String, val name: String, val artist: String?)
+  private data class AutoPlaylist(val id: String, val name: String, val songCount: Int?)
   private data class AutoSong(
     val id: String,
     val title: String,
@@ -911,6 +949,13 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
       get("/getGenres").optJSONObject("genres")
         ?.optJSONArray("genre")
         .orEmptyObjects()
+
+    fun getPlaylists(): List<JSONObject> =
+      get("/getPlaylists").optJSONObject("playlists")
+        ?.optJSONArray("playlist")
+        .orEmptyObjects()
+
+    fun getPlaylist(id: String): JSONObject = get("/getPlaylist", "id" to id).optJSONObject("playlist") ?: JSONObject()
 
     fun getSongsByGenre(genre: String, count: Int): List<JSONObject> =
       get("/getSongsByGenre", "genre" to genre, "count" to count.toString())
@@ -995,10 +1040,13 @@ class AndroidAutoMediaService : MediaBrowserServiceCompat() {
     const val MEDIA_ID_FAVORITE_SONGS = "favorite_songs"
     const val MEDIA_ID_DOWNLOADED = "downloaded"
     const val MEDIA_ID_GENRES = "genres"
+    const val MEDIA_ID_PLAYLISTS = "playlists"
     const val PREFIX_ARTIST = "artist:"
     const val PREFIX_ALBUM = "album:"
     const val PREFIX_SONG = "song:"
     const val PREFIX_ALBUM_SONG = "album_song:"
+    const val PREFIX_PLAYLIST = "playlist:"
+    const val PREFIX_PLAYLIST_SONG = "playlist_song:"
     const val PREFIX_SEARCH_SONG = "search_song:"
     const val PREFIX_FAVORITE_SONG = "favorite_song:"
     const val PREFIX_DOWNLOADED_ALBUM = "downloaded_album:"
