@@ -21,7 +21,7 @@ function Find-AndroidSdk {
 
 function Get-AuthorizedDevices([string]$Adb) {
   $lines = & $Adb devices
-  return @($lines | Select-Object -Skip 1 | Where-Object { $_ -match "^([^\s]+)\s+device$" } | ForEach-Object {
+  Write-Output -NoEnumerate @($lines | Select-Object -Skip 1 | Where-Object { $_ -match "^([^\s]+)\s+device$" } | ForEach-Object {
     ($_ -split '\s+')[0]
   })
 }
@@ -77,7 +77,15 @@ switch ($Mode) {
     if ($LASTEXITCODE -ne 0) { throw 'ADB port forwarding failed.' }
     Write-Host "ADB tunnel ready for $Serial on tcp:5277."
     Write-Host 'Starting the Android Auto Desktop Head Unit...'
-    Start-Process -FilePath $dhu -WorkingDirectory (Split-Path -Parent $dhu)
+    $dhuDirectory = Split-Path -Parent $dhu
+    $dhuConfig = Join-Path $dhuDirectory 'config\default_720p.ini'
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $dhu
+    $processInfo.Arguments = "--config=`"$dhuConfig`""
+    $processInfo.WorkingDirectory = $dhuDirectory
+    $processInfo.UseShellExecute = $true
+    $process = [System.Diagnostics.Process]::Start($processInfo)
+    Write-Host "DHU process started (PID $($process.Id))."
     Write-Host 'On the phone, accept any first-run Android Auto prompts.'
   }
   'sessions' {
